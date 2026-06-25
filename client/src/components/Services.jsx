@@ -7,6 +7,7 @@ const Services = () => {
   const [message, setMessage] = useState("Select scan mode to start camera.");
   const [countdown, setCountdown] = useState(0);
   const [cameraAllowed, setCameraAllowed] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const scannerRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -52,10 +53,19 @@ const Services = () => {
         return false;
       }
 
+      const adminToken = localStorage.getItem("adminToken");
+
+      if (!adminToken) {
+        alert("Admin authorization required. Please login as admin first.");
+        setMessage("Admin login required. Please login again.");
+        return false;
+      }
+
       const response = await fetch("/api/scan/attendance", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
           ...data,
@@ -207,35 +217,76 @@ const Services = () => {
     }
   };
 
-  const scanImageFile = async (event) => {
-    const file = event.target.files[0];
-
+  const processImageFile = async (file) => {
     if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please drop a valid QR image file.");
+      setMessage("Only image files can be scanned.");
+      return;
+    }
 
     if (!scanType) {
       alert("First select scan mode: Entry / Break Out / Break In / Out");
-      event.target.value = "";
+      setMessage("Select a scan mode before dropping the QR image.");
       return;
     }
 
     if (scanLockRef.current) {
       alert("Scan already detected. Please wait.");
-      event.target.value = "";
       return;
     }
 
+    let fileScanner = null;
+
     try {
-      const html5QrCode = new Html5Qrcode("reader-file");
-      const decodedText = await html5QrCode.scanFile(file, true);
+      setMessage("Reading dropped QR image...");
+      fileScanner = new Html5Qrcode("reader-file");
+      const decodedText = await fileScanner.scanFile(file, true);
 
       await handleDetectedQR(decodedText, scanType);
-
-      event.target.value = "";
     } catch (error) {
       console.error(error);
       alert("QR not detected from image. Please upload a clear QR image.");
-      event.target.value = "";
+      setMessage("QR not detected. Drop a clear QR image.");
+    } finally {
+      if (fileScanner) {
+        try {
+          await fileScanner.clear();
+        } catch (error) {}
+      }
     }
+  };
+
+  const scanImageFile = async (event) => {
+    const file = event.target.files?.[0];
+    await processImageFile(file);
+    event.target.value = "";
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+
+    const file = event.dataTransfer.files?.[0];
+    await processImageFile(file);
   };
 
   return (
@@ -359,16 +410,37 @@ const Services = () => {
               </div>
             </div>
 
-            <div className="relative bg-white rounded-[28px] p-3 min-h-[360px] md:min-h-[500px] flex items-center justify-center overflow-hidden">
+            <div
+              onDragEnter={handleDragOver}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`relative bg-white rounded-[28px] p-3 min-h-[360px] md:min-h-[500px] flex items-center justify-center overflow-hidden transition ${
+                isDragging
+                  ? "ring-4 ring-purple-500 bg-purple-50 scale-[1.01]"
+                  : ""
+              }`}
+            >
               <div id="reader" className="w-full max-w-[520px]"></div>
 
-              {!isScanning && (
+              {isDragging ? (
+                <div className="absolute inset-3 z-20 rounded-[24px] border-4 border-dashed border-purple-600 bg-white/95 flex items-center justify-center pointer-events-none">
+                  <div className="text-center px-6">
+                    <p className="text-purple-700 text-2xl font-extrabold">
+                      Drop QR Image Here
+                    </p>
+                    <p className="text-black/50 mt-2 font-semibold">
+                      It will scan automatically
+                    </p>
+                  </div>
+                </div>
+              ) : !isScanning ? (
                 <div className="absolute inset-3 rounded-[24px] border-2 border-dashed border-black/20 flex items-center justify-center pointer-events-none">
                   <p className="text-black/50 font-bold text-center px-6">
-                    Select scan mode to start camera
+                    Select scan mode, then use camera or drag QR image here
                   </p>
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div id="reader-file" style={{ display: "none" }}></div>
@@ -403,7 +475,7 @@ const Services = () => {
                 onClick={() => fileInputRef.current.click()}
                 className="w-full bg-white/10 text-white py-4 rounded-2xl font-bold hover:bg-white/15 transition"
               >
-                Upload QR Image
+                Upload QR Image or Drag It Into Camera Box
               </button>
             </div>
           </div>

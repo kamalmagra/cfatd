@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faWhatsapp } from "@fortawesome/free-brands-svg-icons";
+
+const SUPPORT_EMAIL = "cfatd.notification@gmail.com";
 
 const Footer = () => {
   const location = useLocation();
@@ -12,132 +12,103 @@ const Footer = () => {
       : "text-gray-500 hover:text-white transition";
 
   return (
-    <footer className="relative bg-black border-t border-white/10 text-white overflow-hidden">
+    <footer className="relative overflow-hidden border-t border-white/10 bg-black text-white">
+      <div className="absolute left-20 top-0 h-72 w-72 rounded-full bg-purple-600/10 blur-[120px]" />
+      <div className="absolute bottom-0 right-20 h-72 w-72 rounded-full bg-blue-600/10 blur-[120px]" />
 
-      {/* Background Glow */}
-      <div className="absolute top-0 left-20 w-72 h-72 bg-purple-600/10 blur-[120px] rounded-full"></div>
-      <div className="absolute bottom-0 right-20 w-72 h-72 bg-blue-600/10 blur-[120px] rounded-full"></div>
-
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-14">
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-14">
+        <div className="grid grid-cols-1 gap-12 md:grid-cols-3">
           {/* Company */}
           <div>
-            <h2 className="text-3xl font-bold mb-4">
-              Cargo Force
-            </h2>
+            <h2 className="mb-4 text-3xl font-bold">Cargo Force</h2>
 
-            <p className="text-gray-400 leading-7">
+            <p className="leading-7 text-gray-400">
               Employee QR Attendance Management System.
               <br />
               Secure • Fast • Reliable
             </p>
 
-            <div className="mt-6 inline-flex items-center gap-2 bg-[#111] border border-white/10 rounded-full px-4 py-2">
-              <span className="w-2 h-2 bg-green-400 rounded-full"></span>
-              <span className="text-sm text-gray-400">
-                System Online
-              </span>
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#111] px-4 py-2">
+              <span className="h-2 w-2 rounded-full bg-green-400" />
+              <span className="text-sm text-gray-400">System Online</span>
             </div>
           </div>
 
           {/* Navigation */}
           <div>
-            <h3 className="text-xl font-semibold mb-5">
-              Navigation
-            </h3>
+            <h3 className="mb-5 text-xl font-semibold">Navigation</h3>
 
             <ul className="space-y-4">
-
               <li>
-                <Link
-                  to="/"
-                  className={isActive("/")}
-                >
+                <Link to="/" className={isActive("/")}>
                   Home
                 </Link>
               </li>
 
               <li>
-                <Link
-                  to="/contacts"
-                  className={isActive("/contacts")}
-                >
+                <Link to="/contacts" className={isActive("/contacts")}>
                   Generate QR
                 </Link>
               </li>
 
               <li>
                 <Link
-                  to="/login"
-                  className={isActive("/login")}
+                  to="/public-announcements"
+                  className={isActive("/public-announcements")}
                 >
-                  Login
+                  Public Announcements
                 </Link>
               </li>
 
+              <li>
+                <Link to="/login" className={isActive("/login")}>
+                  Login
+                </Link>
+              </li>
             </ul>
           </div>
 
           {/* Contact */}
           <div>
-            <h3 className="text-xl font-semibold mb-5">
-              Contact
-            </h3>
+            <h3 className="mb-5 text-xl font-semibold">Contact</h3>
 
-            <p className="text-gray-400 mb-6">
+            <p className="mb-6 text-gray-400">
               Need help with the attendance system?
             </p>
 
             <a
-              href="https://wa.me/+447438525575"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-4 bg-[#111] border border-white/10 rounded-2xl px-5 py-4 hover:bg-green-500 transition-all duration-300"
+              href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+                "Cargo Force Attendance Support"
+              )}`}
+              className="inline-flex items-center gap-4 rounded-2xl border border-white/10 bg-[#111] px-5 py-4 transition hover:border-blue-500/40 hover:bg-blue-500/20"
             >
-              <div className="w-12 h-12 rounded-xl bg-green-500 flex items-center justify-center">
-                <FontAwesomeIcon
-                  icon={faWhatsapp}
-                  className="text-2xl text-white"
-                />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-2xl font-bold text-white">
+                @
               </div>
 
-              <div>
-                <p className="font-semibold text-white">
-                  Parth Patel
-                </p>
+              <div className="min-w-0">
+                <p className="font-semibold text-white">Email Support</p>
 
-                <p className="text-gray-300 text-sm">
-                  +447438525575
+                <p className="break-all text-sm text-gray-300">
+                  {SUPPORT_EMAIL}
                 </p>
               </div>
             </a>
           </div>
-
         </div>
 
         {/* Bottom */}
-
-        <div className="border-t border-white/10 mt-12 pt-6 flex flex-col md:flex-row justify-between items-center">
-
-          <p className="text-gray-500 text-sm text-center md:text-left">
-            © {new Date().getFullYear()} Cargo Force.
-            All Rights Reserved.
+        <div className="mt-12 flex flex-col items-center justify-between border-t border-white/10 pt-6 md:flex-row">
+          <p className="text-center text-sm text-gray-500 md:text-left">
+            © {new Date().getFullYear()} Cargo Force. All Rights Reserved.
           </p>
 
-          <p className="text-gray-500 text-sm mt-3 md:mt-0 text-center">
+          <p className="mt-3 text-center text-sm text-gray-500 md:mt-0">
             Designed & Developed by{" "}
-            <span className="text-white font-semibold">
-              Kamlesh Magra
-            </span>{" "}
-           
+            <span className="font-semibold text-white">Kamlesh Magra</span>
           </p>
-
         </div>
-
       </div>
-
     </footer>
   );
 };

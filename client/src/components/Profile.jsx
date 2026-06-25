@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const WHATSAPP_NUMBER = "447438525575";
+const SUPPORT_EMAIL = "cfatd.notification@gmail.com";
 
 const Profile = () => {
   const [user, setUser] = useState(null);
   const [attendance, setAttendance] = useState([]);
+  const [attendanceSummary, setAttendanceSummary] = useState(null);
+  const [attendanceInsights, setAttendanceInsights] = useState(null);
+  const [announcements, setAnnouncements] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [upcomingShifts, setUpcomingShifts] = useState([]);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState("");
   const navigate = useNavigate();
 
@@ -33,21 +39,130 @@ const Profile = () => {
 
       setUser(currentUser);
 
-      fetch("/api/scan/attendance")
-        .then((res) => res.json())
-        .then((data) => {
-          const allRecords = data.data || [];
+      const loadEmployeeData = async () => {
+        try {
+          const [
+            attendanceResponse,
+            summaryResponse,
+            insightResponse,
+            announcementResponse,
+            notificationResponse,
+            shiftResponse,
+          ] = await Promise.all([
+              fetch("/api/my/attendance", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+              fetch("/api/my/attendance/summary", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+              fetch("/api/my/attendance/insights", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+              fetch("/api/announcements/employee", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+              fetch("/api/personal-notifications/me", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+              fetch("/api/shift-schedules/me?upcoming=true", {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }),
+            ]);
 
-          const myRecords = allRecords.filter(
-            (item) =>
-              item.userId === currentUser.id ||
-              item.username === currentUser.username ||
-              item.email === currentUser.email
-          );
+          const attendanceData = await attendanceResponse.json();
+          const summaryData = await summaryResponse.json();
+          const insightData = await insightResponse.json();
+          const announcementData = await announcementResponse.json();
+          const notificationData = await notificationResponse.json();
+          const shiftData = await shiftResponse.json();
+
+          const myRecords = attendanceData.data || [];
+          const employeeAnnouncements = announcementData.data || [];
+          const personalNotifications = notificationData.data || [];
 
           setAttendance(myRecords);
-        })
-        .catch((err) => console.error("Attendance Error:", err));
+          setAttendanceSummary(summaryData.data || null);
+          setAttendanceInsights(insightData.data || null);
+          setAnnouncements(employeeAnnouncements);
+          setNotifications(personalNotifications);
+          setUpcomingShifts(shiftData.data || []);
+
+          const popupNotification = personalNotifications.find(
+            (item) => item.showPopup && !item.isRead
+          );
+
+          if (popupNotification) {
+            if (window.showInfo) {
+              window.showInfo(
+                `${popupNotification.title}\n\n${popupNotification.message}`
+              );
+            }
+
+            fetch(
+              `/api/personal-notifications/${popupNotification._id}/read`,
+              {
+                method: "PATCH",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }
+            )
+              .then((response) => {
+                if (response.ok) {
+                  setNotifications((current) =>
+                    current.map((item) =>
+                      item._id === popupNotification._id
+                        ? { ...item, isRead: true }
+                        : item
+                    )
+                  );
+                }
+              })
+              .catch((error) =>
+                console.error("Mark notification read error:", error)
+              );
+          } else {
+            const popupAnnouncement = employeeAnnouncements.find(
+              (item) =>
+                item.showPopup &&
+                sessionStorage.getItem(
+                  `announcement-popup-${item._id}`
+                ) !== "shown"
+            );
+
+            if (popupAnnouncement) {
+              if (window.showInfo) {
+                window.showInfo(
+                  `${popupAnnouncement.title}\n\n${popupAnnouncement.message}`
+                );
+              }
+
+              sessionStorage.setItem(
+                `announcement-popup-${popupAnnouncement._id}`,
+                "shown"
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Employee profile data error:", error);
+        } finally {
+          setMessagesLoading(false);
+        }
+      };
+
+      loadEmployeeData();
     } catch (error) {
       console.error("Invalid token");
       localStorage.removeItem("userToken");
@@ -67,6 +182,56 @@ const Profile = () => {
   const formatDate = (date) => {
     if (!date) return "-";
     return new Date(date).toLocaleDateString("en-GB");
+  };
+
+  const formatMessageDate = (date) => {
+    if (!date) return "-";
+
+    return new Date(date).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const markNotificationRead = async (notificationId) => {
+    const token = localStorage.getItem("userToken");
+
+    if (!token) return;
+
+    try {
+      const response = await fetch(
+        `/api/personal-notifications/${notificationId}/read`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response.ok) {
+        setNotifications((current) =>
+          current.map((item) =>
+            item._id === notificationId
+              ? { ...item, isRead: true }
+              : item
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Notification update error:", error);
+    }
+  };
+
+  const priorityClass = (priority) => {
+    if (priority === "urgent") return "bg-red-500/10 text-red-400";
+    if (priority === "important") {
+      return "bg-yellow-500/10 text-yellow-400";
+    }
+    return "bg-blue-500/10 text-blue-400";
   };
 
   const formatSeconds = (seconds) => {
@@ -105,8 +270,21 @@ const Profile = () => {
       })
     : attendance;
 
+  const myWeekSummary = attendanceSummary?.week || {};
+  const myMonthSummary = attendanceSummary?.month || {};
+  const myInsightTotals = attendanceInsights?.totals || {};
+  const myLateDays = myInsightTotals.lateDays || 0;
+  const myAbsentDays = myInsightTotals.absentDays || 0;
+  const myOvertimeDays = myInsightTotals.overtimeDays || 0;
+  const myLateSeconds = myInsightTotals.totalLateSeconds || 0;
+  const myOvertimeSeconds = myInsightTotals.totalOvertimeSeconds || 0;
+
   const raiseQuery = (item) => {
-    const message = `Hello,
+    const subject = `Attendance Correction Query - ${
+      item.date || formatDate(item.createdAt)
+    }`;
+
+    const message = `Hello Admin,
 
 I want to raise an attendance correction query.
 
@@ -127,11 +305,11 @@ My shift/attendance details are different or wrong. Please check and correct thi
 
 Thank you.`;
 
-    const whatsappUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-      message
-    )}`;
+    const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+      subject
+    )}&body=${encodeURIComponent(message)}`;
 
-    window.open(whatsappUrl, "_blank");
+    window.location.href = emailUrl;
   };
 
   return (
@@ -150,6 +328,310 @@ Thank you.`;
             My
             <span className="block text-gray-500">Attendance</span>
           </h1>
+        </div>
+
+        <section className="mb-8 rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl">
+          <div className="mb-6">
+            <p className="text-sm text-gray-500">Attendance Summary</p>
+            <h2 className="text-2xl font-bold">My Weekly & Monthly Hours</h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+            <div className="rounded-[24px] border border-green-500/20 bg-green-500/10 p-5">
+              <p className="text-sm text-gray-400">This Week Hours</p>
+              <h3 className="mt-2 text-2xl font-bold text-green-400">
+                {formatSeconds(myWeekSummary.totalWorkSeconds)}
+              </h3>
+            </div>
+
+            <div className="rounded-[24px] border border-blue-500/20 bg-blue-500/10 p-5">
+              <p className="text-sm text-gray-400">This Month Hours</p>
+              <h3 className="mt-2 text-2xl font-bold text-blue-400">
+                {formatSeconds(myMonthSummary.totalWorkSeconds)}
+              </h3>
+            </div>
+
+            <div className="rounded-[24px] border border-purple-500/20 bg-purple-500/10 p-5">
+              <p className="text-sm text-gray-400">Present Days This Month</p>
+              <h3 className="mt-2 text-3xl font-bold text-purple-400">
+                {myMonthSummary.presentDays || 0}
+              </h3>
+            </div>
+
+            <div className="rounded-[24px] border border-yellow-500/20 bg-yellow-500/10 p-5">
+              <p className="text-sm text-gray-400">Month Break Time</p>
+              <h3 className="mt-2 text-2xl font-bold text-yellow-400">
+                {formatSeconds(myMonthSummary.totalBreakSeconds)}
+              </h3>
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-8 rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl">
+          <div className="mb-6">
+            <p className="text-sm text-gray-500">Shift Insights</p>
+            <h2 className="text-2xl font-bold">Late, Absence & Overtime</h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+            <div className="rounded-[24px] border border-red-500/20 bg-red-500/10 p-5">
+              <p className="text-sm text-gray-400">Late Days This Month</p>
+              <h3 className="mt-2 text-3xl font-bold text-red-400">
+                {myLateDays}
+              </h3>
+              <p className="mt-2 text-xs text-gray-500">
+                Late time: {formatSeconds(myLateSeconds)}
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-orange-500/20 bg-orange-500/10 p-5">
+              <p className="text-sm text-gray-400">Absent Days This Month</p>
+              <h3 className="mt-2 text-3xl font-bold text-orange-400">
+                {myAbsentDays}
+              </h3>
+              <p className="mt-2 text-xs text-gray-500">
+                Working days with no entry scan
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-cyan-500/20 bg-cyan-500/10 p-5">
+              <p className="text-sm text-gray-400">Overtime Days</p>
+              <h3 className="mt-2 text-3xl font-bold text-cyan-400">
+                {myOvertimeDays}
+              </h3>
+              <p className="mt-2 text-xs text-gray-500">
+                OT time: {formatSeconds(myOvertimeSeconds)}
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-[#111] p-5">
+              <p className="text-sm text-gray-400">Grace Time</p>
+              <h3 className="mt-2 text-3xl font-bold text-white">
+                {attendanceInsights?.graceMinutes || 10} min
+              </h3>
+              <p className="mt-2 text-xs text-gray-500">
+                Late count starts after scheduled start + grace
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-[#050505] border border-white/10 rounded-[30px] p-6 shadow-2xl mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            <div>
+              <p className="text-gray-500 text-sm">Future Rota</p>
+              <h2 className="text-2xl font-bold">My Upcoming Shifts</h2>
+            </div>
+
+            <span className="bg-green-500/10 text-green-400 px-4 py-2 rounded-full text-sm font-semibold">
+              {upcomingShifts.filter((item) => item.status === "working").length}{" "}
+              Working Days
+            </span>
+          </div>
+
+          {messagesLoading ? (
+            <p className="text-center text-gray-500 py-12">
+              Loading upcoming shifts...
+            </p>
+          ) : upcomingShifts.length === 0 ? (
+            <div className="border border-dashed border-white/10 rounded-3xl py-12 text-center">
+              <p className="text-gray-500">
+                No future shifts have been scheduled yet.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <div className="flex gap-4 min-w-max pb-2">
+                {upcomingShifts.map((shiftItem) => (
+                  <article
+                    key={shiftItem._id}
+                    className={`w-56 rounded-3xl border p-5 ${
+                      shiftItem.status === "working"
+                        ? "border-green-500/30 bg-green-500/10"
+                        : shiftItem.status === "leave"
+                        ? "border-yellow-500/30 bg-yellow-500/10"
+                        : shiftItem.status === "holiday"
+                        ? "border-purple-500/30 bg-purple-500/10"
+                        : "border-white/10 bg-[#111]"
+                    }`}
+                  >
+                    <p className="text-xs font-bold uppercase text-gray-500">
+                      {new Date(`${shiftItem.date}T00:00:00`).toLocaleDateString(
+                        "en-GB",
+                        { weekday: "long" }
+                      )}
+                    </p>
+
+                    <h3 className="text-xl font-bold mt-1">
+                      {new Date(`${shiftItem.date}T00:00:00`).toLocaleDateString(
+                        "en-GB",
+                        {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        }
+                      )}
+                    </h3>
+
+                    <span className="inline-block mt-3 rounded-full bg-black/20 px-3 py-1 text-xs font-bold uppercase">
+                      {shiftItem.status}
+                    </span>
+
+                    {shiftItem.status === "working" && (
+                      <div className="mt-4 text-sm">
+                        <p className="font-semibold">
+                          {shiftItem.startTime || "-"} -{" "}
+                          {shiftItem.endTime || "-"}
+                        </p>
+                        <p className="text-gray-500 mt-1">
+                          Break: {shiftItem.breakStartTime || "-"} -{" "}
+                          {shiftItem.breakEndTime || "-"}
+                        </p>
+                      </div>
+                    )}
+
+                    {shiftItem.notes && (
+                      <p className="text-xs text-gray-500 mt-3 line-clamp-2">
+                        {shiftItem.notes}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <section className="bg-[#050505] border border-white/10 rounded-[30px] p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <p className="text-gray-500 text-sm">Company Updates</p>
+                <h2 className="text-2xl font-bold">
+                  Employee Announcements
+                </h2>
+              </div>
+
+              <span className="bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full text-sm font-semibold">
+                {announcements.length}
+              </span>
+            </div>
+
+            {messagesLoading ? (
+              <p className="text-center text-gray-500 py-12">
+                Loading announcements...
+              </p>
+            ) : announcements.length === 0 ? (
+              <div className="border border-dashed border-white/10 rounded-3xl py-12 text-center">
+                <p className="text-gray-500">No employee announcements.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[430px] overflow-y-auto pr-1">
+                {announcements.map((announcement) => (
+                  <article
+                    key={announcement._id}
+                    className="bg-[#111] border border-white/10 rounded-3xl p-5"
+                  >
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      <span className="bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full text-xs font-bold uppercase">
+                        Employee Notice
+                      </span>
+
+                      <span className="text-gray-600 text-xs">
+                        {formatMessageDate(announcement.createdAt)}
+                      </span>
+                    </div>
+
+                    <h3 className="text-xl font-bold break-words">
+                      {announcement.title}
+                    </h3>
+
+                    <p className="text-gray-400 text-sm leading-6 mt-3 whitespace-pre-wrap break-words">
+                      {announcement.message}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="bg-[#050505] border border-white/10 rounded-[30px] p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <p className="text-gray-500 text-sm">Private Inbox</p>
+                <h2 className="text-2xl font-bold">
+                  Personal Notifications
+                </h2>
+              </div>
+
+              <span className="bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full text-sm font-semibold">
+                {notifications.filter((item) => !item.isRead).length} New
+              </span>
+            </div>
+
+            {messagesLoading ? (
+              <p className="text-center text-gray-500 py-12">
+                Loading notifications...
+              </p>
+            ) : notifications.length === 0 ? (
+              <div className="border border-dashed border-white/10 rounded-3xl py-12 text-center">
+                <p className="text-gray-500">No personal notifications.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[430px] overflow-y-auto pr-1">
+                {notifications.map((notification) => (
+                  <article
+                    key={notification._id}
+                    className={`border rounded-3xl p-5 ${
+                      notification.isRead
+                        ? "bg-[#111] border-white/10"
+                        : "bg-blue-500/10 border-blue-500/30"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${priorityClass(
+                          notification.priority
+                        )}`}
+                      >
+                        {notification.priority || "normal"}
+                      </span>
+
+                      <span className="text-gray-600 text-xs">
+                        {formatMessageDate(notification.createdAt)}
+                      </span>
+
+                      {!notification.isRead && (
+                        <span className="bg-green-500/10 text-green-400 px-3 py-1 rounded-full text-xs font-semibold">
+                          New
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className="text-xl font-bold break-words">
+                      {notification.title}
+                    </h3>
+
+                    <p className="text-gray-400 text-sm leading-6 mt-3 whitespace-pre-wrap break-words">
+                      {notification.message}
+                    </p>
+
+                    {!notification.isRead && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          markNotificationRead(notification._id)
+                        }
+                        className="mt-4 bg-white text-black px-4 py-2 rounded-2xl text-sm font-bold hover:bg-gray-200 transition"
+                      >
+                        Mark as Read
+                      </button>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
@@ -182,6 +664,20 @@ Thank you.`;
                 <p className="text-gray-500 text-sm">Total Records</p>
                 <h3 className="text-3xl font-bold mt-2">
                   {attendance.length}
+                </h3>
+              </div>
+
+              <div className="bg-[#111] border border-white/10 rounded-3xl p-5">
+                <p className="text-gray-500 text-sm">This Week</p>
+                <h3 className="text-2xl font-bold mt-2 text-green-400">
+                  {formatSeconds(myWeekSummary.totalWorkSeconds)}
+                </h3>
+              </div>
+
+              <div className="bg-[#111] border border-white/10 rounded-3xl p-5">
+                <p className="text-gray-500 text-sm">This Month</p>
+                <h3 className="text-2xl font-bold mt-2 text-blue-400">
+                  {formatSeconds(myMonthSummary.totalWorkSeconds)}
                 </h3>
               </div>
 
@@ -275,7 +771,7 @@ Thank you.`;
                             onClick={() => raiseQuery(item)}
                             className="bg-green-500/10 text-green-400 px-4 py-2 rounded-2xl font-semibold hover:bg-green-500/20 transition"
                           >
-                            Raise Query
+                            Email Query
                           </button>
                         </td>
                       </tr>
@@ -295,8 +791,8 @@ Thank you.`;
             </div>
 
             <p className="text-gray-500 text-sm mt-5">
-              Employees can only view records. For corrections, use Raise Query
-              to send details on WhatsApp.
+              Employees can only view records. For corrections, use Email Query
+              to send the attendance details to {SUPPORT_EMAIL}.
             </p>
           </div>
         </div>

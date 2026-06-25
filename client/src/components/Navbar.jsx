@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Logo from "../assets/Copilot_20260610_092835.png";
 
@@ -46,6 +46,11 @@ const Navbar = () => {
   const menuItems = [
     { name: "Overview", path: "/", icon: "⌘" },
     { name: "Generate QR", path: "/contacts", icon: "▣" },
+    {
+      name: "Announcements",
+      path: "/public-announcements",
+      icon: "!",
+    },
     { name: "Admin Login", path: "/admin-login", icon: "◆" },
     { name: "Profile", path: "/profile", icon: "◉" },
   ];
@@ -90,6 +95,17 @@ const Navbar = () => {
               }`}
             >
               Generate QR
+            </Link>
+
+            <Link
+              to="/public-announcements"
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition ${
+                isActive("/public-announcements")
+                  ? "bg-white text-black"
+                  : "text-gray-400 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              Announcements
             </Link>
 
             <Link
