@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 const Contacts = () => {
@@ -19,9 +19,76 @@ const Contacts = () => {
     loadUserQR();
   }, []);
 
+  const getToken = () => {
+    return localStorage.getItem("userToken") || localStorage.getItem("token");
+  };
+
+  const decodeJwtPayload = (token) => {
+    const payload = token.split(".")[1];
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "="
+    );
+    return JSON.parse(atob(padded));
+  };
+
+  const getUserIdFromDecodedToken = (decoded) => {
+    return (
+      decoded.id ||
+      decoded._id ||
+      decoded.userId ||
+      decoded.user?.id ||
+      decoded.user?._id ||
+      decoded.user?.userId ||
+      ""
+    );
+  };
+
+  const getQrVersionFromDecodedToken = (decoded, userId) => {
+    const savedQrVersion = userId
+      ? localStorage.getItem(`currentQrVersion_${userId}`)
+      : "";
+
+    return (
+      savedQrVersion ||
+      decoded.currentQrVersion ||
+      decoded.qrVersion ||
+      decoded.qr ||
+      decoded.user?.currentQrVersion ||
+      decoded.user?.qrVersion ||
+      ""
+    );
+  };
+
+  const makeTinyQRValue = (employeeData) => {
+    return JSON.stringify({
+      u: employeeData.userId || "",
+      v: employeeData.qrVersion || "",
+    });
+  };
+
+  const makeDisplayData = (baseUser, details, qrVersion) => {
+    return {
+      userId: baseUser.userId,
+      name: baseUser.name,
+      username: baseUser.username,
+      email: baseUser.email,
+
+      qrVersion,
+      qrGeneratedAt: new Date().toISOString(),
+
+      mobile: details.mobile || "Not Added",
+      employeeId: details.employeeId || "Not Added",
+      department: details.department || "Not Added",
+      jobRole: details.jobRole || "Not Added",
+      shift: details.shift || "Not Added",
+      emergencyContact: details.emergencyContact || "Not Added",
+    };
+  };
+
   const loadUserQR = () => {
-    const token =
-      localStorage.getItem("userToken") || localStorage.getItem("token");
+    const token = getToken();
 
     if (!token) {
       alert("No login token found. Please login again.");
@@ -29,22 +96,34 @@ const Contacts = () => {
     }
 
     try {
-      const decoded = JSON.parse(atob(token.split(".")[1]));
+      const decoded = decodeJwtPayload(token);
+      const userId = getUserIdFromDecodedToken(decoded);
+
+      if (!userId) {
+        alert("User ID not found. Please login again.");
+        return;
+      }
 
       const savedDetails = JSON.parse(
         localStorage.getItem("employeeExtraDetails") || "{}"
       );
 
       const employeeData = {
-        qrVersion: decoded.currentQrVersion || "",
+        userId,
+        name:
+          decoded.name ||
+          decoded.username ||
+          decoded.user?.name ||
+          decoded.user?.username ||
+          "",
+        username: decoded.username || decoded.user?.username || "",
+        email: decoded.email || decoded.user?.email || "",
+
+        qrVersion: getQrVersionFromDecodedToken(decoded, userId),
         qrGeneratedAt: new Date().toISOString(),
 
-        userId: decoded.id || decoded._id || decoded.userId || "",
-        name: decoded.name || decoded.username || "",
-        username: decoded.username || "",
-        email: decoded.email || "",
-
-        mobile: savedDetails.mobile || decoded.mobile || "",
+        mobile:
+          savedDetails.mobile || decoded.mobile || decoded.user?.mobile || "",
         employeeId: savedDetails.employeeId || "",
         department: savedDetails.department || "",
         jobRole: savedDetails.jobRole || "",
@@ -63,30 +142,11 @@ const Contacts = () => {
         emergencyContact: employeeData.emergencyContact,
       });
 
-      setQrValue(JSON.stringify(employeeData));
+      setQrValue(makeTinyQRValue(employeeData));
     } catch (error) {
-      console.log(error);
+      console.error(error);
       alert("Token decode error. Please login again.");
     }
-  };
-
-  const makeQRData = (details, qrVersion) => {
-    return {
-      qrVersion,
-      qrGeneratedAt: new Date().toISOString(),
-
-      userId: user.userId,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-
-      mobile: details.mobile || "Not Added",
-      employeeId: details.employeeId || "Not Added",
-      department: details.department || "Not Added",
-      jobRole: details.jobRole || "Not Added",
-      shift: details.shift || "Not Added",
-      emergencyContact: details.emergencyContact || "Not Added",
-    };
   };
 
   const updateQRDetails = () => {
@@ -94,20 +154,40 @@ const Contacts = () => {
 
     localStorage.setItem("employeeExtraDetails", JSON.stringify(extraDetails));
 
-    const updatedUser = makeQRData(extraDetails, user.qrVersion);
+    const updatedUser = makeDisplayData(user, extraDetails, user.qrVersion);
 
     setUser(updatedUser);
-    setQrValue(JSON.stringify(updatedUser));
+    setQrValue(makeTinyQRValue(updatedUser));
 
     alert("Employee details updated successfully.");
+  };
+
+  const getNewQrVersionFromResponse = (result) => {
+    return (
+      result.qrVersion ||
+      result.currentQrVersion ||
+      result.newQrVersion ||
+      result.version ||
+      result.user?.currentQrVersion ||
+      result.user?.qrVersion ||
+      result.data?.qrVersion ||
+      result.data?.currentQrVersion ||
+      result.updatedUser?.currentQrVersion ||
+      result.updatedUser?.qrVersion ||
+      ""
+    );
   };
 
   const generateNewQR = async () => {
     if (!user) return;
 
     try {
-      const token =
-        localStorage.getItem("userToken") || localStorage.getItem("token");
+      const token = getToken();
+
+      if (!token) {
+        alert("No login token found. Please login again.");
+        return;
+      }
 
       const response = await fetch("/api/user/generate-qr", {
         method: "POST",
@@ -118,17 +198,28 @@ const Contacts = () => {
 
       const result = await response.json();
 
+      console.log("Generate QR response:", result);
+
       if (!response.ok || !result.success) {
         alert(result.message || "Failed to generate new QR");
         return;
       }
 
-      localStorage.setItem("employeeExtraDetails", JSON.stringify(extraDetails));
+      const newQrVersion = getNewQrVersionFromResponse(result);
 
-      const newUserData = makeQRData(extraDetails, result.qrVersion);
+      if (!newQrVersion) {
+        alert("New QR version not received from server.");
+        return;
+      }
+
+      localStorage.setItem("employeeExtraDetails", JSON.stringify(extraDetails));
+      localStorage.setItem(`currentQrVersion_${user.userId}`, newQrVersion);
+
+      const newUserData = makeDisplayData(user, extraDetails, newQrVersion);
+      const newQrValue = makeTinyQRValue(newUserData);
 
       setUser(newUserData);
-      setQrValue(JSON.stringify(newUserData));
+      setQrValue(newQrValue);
 
       alert("New QR generated successfully. Old QR will not work now.");
     } catch (error) {
@@ -147,7 +238,9 @@ const Contacts = () => {
 
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${user.username || "employee"}-${user.qrVersion}.png`;
+    link.download = `${user.username || "employee"}-${
+      user.qrVersion || "qr"
+    }.png`;
     link.click();
   };
 
@@ -171,8 +264,8 @@ const Contacts = () => {
           </h1>
 
           <p className="text-gray-400 mt-5 max-w-2xl mx-auto">
-            Generate a new QR anytime for safety. After new QR is generated,
-            old QR will not work.
+            This QR is lightweight and fast to scan. It only stores employee ID
+            and QR version.
           </p>
         </div>
 
@@ -190,9 +283,7 @@ const Contacts = () => {
                   </div>
 
                   <div>
-                    <h2 className="text-2xl font-bold">
-                      {user.name || "-"}
-                    </h2>
+                    <h2 className="text-2xl font-bold">{user.name || "-"}</h2>
                     <p className="text-gray-500">Employee Account</p>
                   </div>
                 </div>
@@ -210,14 +301,7 @@ const Contacts = () => {
                     value={user.emergencyContact || "-"}
                   />
                   <InfoCard label="QR Version" value={user.qrVersion || "-"} />
-                  <InfoCard
-                    label="QR Generated"
-                    value={
-                      user.qrGeneratedAt
-                        ? new Date(user.qrGeneratedAt).toLocaleString()
-                        : "-"
-                    }
-                  />
+                  <InfoCard label="QR Type" value="Small / Fast Scan" />
                 </div>
 
                 <div className="bg-[#111] border border-white/10 rounded-3xl p-5">
@@ -271,10 +355,10 @@ const Contacts = () => {
                   </p>
 
                   <ul className="space-y-2 text-gray-300">
-                    <li>1. Add/update details first.</li>
-                    <li>2. Generate new QR if you want safety refresh.</li>
-                    <li>3. Old QR will stop working after new QR.</li>
-                    <li>4. Admin scans Entry → Break Out → Break In → Out.</li>
+                    <li>1. Login as employee.</li>
+                    <li>2. Download this lightweight QR.</li>
+                    <li>3. Admin scans Entry → Break Out → Break In → Out.</li>
+                    <li>4. New QR makes old QR invalid.</li>
                   </ul>
                 </div>
               </div>
@@ -294,7 +378,15 @@ const Contacts = () => {
                   ref={qrRef}
                   className="inline-block bg-white p-5 rounded-[28px] shadow-2xl"
                 >
-                  <QRCodeCanvas value={qrValue} size={320} level="H" />
+                  <QRCodeCanvas
+                    key={qrValue}
+                    value={qrValue}
+                    size={300}
+                    level="M"
+                    includeMargin={true}
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                  />
                 </div>
 
                 <button
@@ -312,8 +404,11 @@ const Contacts = () => {
                 </button>
 
                 <p className="text-gray-500 text-sm mt-4">
-                  QR contains identity only. Attendance time is saved when admin
-                  scans it.
+                  QR contains only userId and QR version for fast scanning.
+                </p>
+
+                <p className="text-gray-700 text-xs mt-2 break-all">
+                  QR Data: {qrValue}
                 </p>
               </>
             ) : (

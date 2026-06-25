@@ -43,11 +43,23 @@ const Services = () => {
     }
   };
 
+  const normalizeQRData = (decodedText) => {
+    const data = JSON.parse(decodedText);
+
+    const userId = data.u || data.userId || data.id || data._id || "";
+    const qrVersion = data.v || data.qrVersion || data.qr || "";
+
+    return {
+      userId,
+      qrVersion,
+    };
+  };
+
   const sendToBackend = async (decodedText, type) => {
     try {
-      const data = JSON.parse(decodedText);
+      const cleanData = normalizeQRData(decodedText);
 
-      if (!data.userId || !data.qrVersion) {
+      if (!cleanData.userId || !cleanData.qrVersion) {
         alert("Invalid QR. Please scan latest employee QR.");
         setMessage("Invalid QR. Missing user ID or QR version.");
         return false;
@@ -68,7 +80,8 @@ const Services = () => {
           Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
-          ...data,
+          userId: cleanData.userId,
+          qrVersion: cleanData.qrVersion,
           scanType: type,
         }),
       });
@@ -83,7 +96,7 @@ const Services = () => {
 
       alert(
         "Employee: " +
-          (result.username || data.username) +
+          (result.username || result.name || cleanData.userId) +
           "\n\n" +
           result.message
       );
@@ -125,18 +138,12 @@ const Services = () => {
 
     await stopScanner();
 
-    setMessage("QR detected. Saving in 3 seconds...");
-    setCountdown(3);
+    setCountdown(0);
+    setMessage("QR detected. Saving attendance...");
 
-    setTimeout(() => setCountdown(2), 1000);
-    setTimeout(() => setCountdown(1), 2000);
+    await sendToBackend(decodedText, type);
 
-    setTimeout(async () => {
-      await sendToBackend(decodedText, type);
-
-      setCountdown(0);
-      scanLockRef.current = false;
-    }, 3000);
+    scanLockRef.current = false;
   };
 
   const startScanner = async (type) => {
@@ -188,18 +195,18 @@ const Services = () => {
       await html5QrCode.start(
         { deviceId: { exact: backCamera.id } },
         {
-          fps: 15,
+          fps: 20,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            const qrSize = Math.floor(minEdge * 0.75);
+            const qrSize = Math.floor(minEdge * 0.68);
             return { width: qrSize, height: qrSize };
           },
           aspectRatio: 1.777778,
           disableFlip: false,
           videoConstraints: {
             facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         },
         async (decodedText) => {
@@ -302,9 +309,7 @@ const Services = () => {
                 cameraAllowed ? "bg-green-400" : "bg-red-400"
               }`}
             ></span>
-            <span className="text-gray-400 text-sm">
-              Mobile Focus QR Scanner
-            </span>
+            <span className="text-gray-400 text-sm">Fast QR Scanner</span>
           </div>
 
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight">
