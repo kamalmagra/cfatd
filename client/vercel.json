@@ -17,18 +17,6 @@
       "destination": "https://cfatd-backend.onrender.com/admin-login"
     },
     {
-      "source": "/book",
-      "destination": "https://cfatd-backend.onrender.com/book"
-    },
-    {
-      "source": "/bookings",
-      "destination": "https://cfatd-backend.onrender.com/bookings"
-    },
-    {
-      "source": "/user-bookings",
-      "destination": "https://cfatd-backend.onrender.com/user-bookings"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
