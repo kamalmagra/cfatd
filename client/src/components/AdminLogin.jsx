@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const AdminLogin = () => {
@@ -13,7 +13,7 @@ const AdminLogin = () => {
     setMessage("");
 
     try {
-      const response = await fetch("/admin-login", {
+      const response = await fetch("https://cfatd-backend.onrender.com/admin-login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

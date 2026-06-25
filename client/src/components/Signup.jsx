@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const Signup = () => {
@@ -15,7 +15,7 @@ const Signup = () => {
     setMessage("");
 
     try {
-      const response = await fetch("/register", {
+      const response = await fetch("https://cfatd-backend.onrender.com/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
