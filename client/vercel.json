@@ -1,0 +1,36 @@
+﻿{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://cfatd-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/login",
+      "destination": "https://cfatd-backend.onrender.com/login"
+    },
+    {
+      "source": "/register",
+      "destination": "https://cfatd-backend.onrender.com/register"
+    },
+    {
+      "source": "/admin-login",
+      "destination": "https://cfatd-backend.onrender.com/admin-login"
+    },
+    {
+      "source": "/book",
+      "destination": "https://cfatd-backend.onrender.com/book"
+    },
+    {
+      "source": "/bookings",
+      "destination": "https://cfatd-backend.onrender.com/bookings"
+    },
+    {
+      "source": "/user-bookings",
+      "destination": "https://cfatd-backend.onrender.com/user-bookings"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
