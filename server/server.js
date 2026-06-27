@@ -20,14 +20,36 @@ mongoose
     .catch((err) => console.error("MongoDB Connection Error:", err));
 
 const getAdminData = () => {
-    try {
-        const filePath = path.join(__dirname, "admins.json");
-        const data = fs.readFileSync(filePath, "utf-8");
-        return JSON.parse(data);
-    } catch (error) {
-        console.error("Error reading admins.json:", error.message);
-        return [];
+    const adminFiles = [
+        path.join(__dirname, "admins.json"),
+        path.join(process.cwd(), "admins.json"),
+        path.join(process.cwd(), "server", "admins.json"),
+    ];
+
+    for (const filePath of adminFiles) {
+        try {
+            if (!fs.existsSync(filePath)) continue;
+
+            const data = fs.readFileSync(filePath, "utf-8");
+            const admins = JSON.parse(data);
+
+            if (Array.isArray(admins)) {
+                return admins;
+            }
+        } catch (error) {
+            console.error(`Error reading admins.json at ${filePath}:`, error.message);
+        }
     }
+
+    if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+        return [{
+            username: process.env.ADMIN_USERNAME,
+            password: process.env.ADMIN_PASSWORD,
+        }, ];
+    }
+
+    console.error("No admin credentials found. Add server/admins.json or ADMIN_USERNAME/ADMIN_PASSWORD in .env");
+    return [];
 };
 
 const generateQRVersion = () => {
@@ -94,6 +116,111 @@ const attendanceSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const Attendance = mongoose.model("Attendance", attendanceSchema);
+
+const isMissingValue = (value) => {
+    return value === undefined || value === null || String(value).trim() === "" || String(value).trim() === "-";
+};
+
+const getEmployeeIdentity = (employee = {}) => {
+    return {
+        name: employee.name || employee.username || "-",
+        username: employee.username || "-",
+        email: employee.email || "-",
+        mobile: employee.mobile || "-",
+    };
+};
+
+const buildUserLookupFilter = (value) => {
+    const stringValue = String(value || "").trim();
+
+    if (!stringValue) {
+        return null;
+    }
+
+    const or = [
+        { email: stringValue },
+        { username: stringValue },
+        { mobile: stringValue },
+    ];
+
+    if (mongoose.Types.ObjectId.isValid(stringValue)) {
+        or.unshift({ _id: stringValue });
+    }
+
+    return { $or: or };
+};
+
+const findUserByIdentifier = async(value) => {
+    const filter = buildUserLookupFilter(value);
+
+    if (!filter) return null;
+
+    return User.findOne(filter).select("_id username email mobile currentQrVersion");
+};
+
+const enrichAttendanceRecords = async(records = []) => {
+    const plainRecords = records.map((record) =>
+        typeof record.toObject === "function" ? record.toObject() : {...record }
+    );
+
+    const lookupValues = new Set();
+
+    plainRecords.forEach((record) => {
+        [record.userId, record.email, record.username, record.mobile].forEach((value) => {
+            if (value) lookupValues.add(String(value));
+        });
+    });
+
+    const values = Array.from(lookupValues);
+
+    if (values.length === 0) {
+        return plainRecords;
+    }
+
+    const objectIds = values.filter((value) => mongoose.Types.ObjectId.isValid(value));
+
+    const users = await User.find({
+        $or: [
+            objectIds.length ? { _id: { $in: objectIds } } : null,
+            { email: { $in: values } },
+            { username: { $in: values } },
+            { mobile: { $in: values } },
+        ].filter(Boolean),
+    }).select("_id username email mobile currentQrVersion");
+
+    const userMap = new Map();
+
+    users.forEach((user) => {
+        const keys = [user._id, user.email, user.username, user.mobile]
+            .filter(Boolean)
+            .map((value) => String(value));
+
+        keys.forEach((key) => userMap.set(key, user));
+    });
+
+    return plainRecords.map((record) => {
+        const employee =
+            userMap.get(String(record.userId || "")) ||
+            userMap.get(String(record.email || "")) ||
+            userMap.get(String(record.username || "")) ||
+            userMap.get(String(record.mobile || ""));
+
+        if (!employee) {
+            return record;
+        }
+
+        const identity = getEmployeeIdentity(employee);
+
+        return {
+            ...record,
+            userId: record.userId || String(employee._id),
+            name: isMissingValue(record.name) ? identity.name : record.name,
+            username: isMissingValue(record.username) ? identity.username : record.username,
+            email: isMissingValue(record.email) ? identity.email : record.email,
+            mobile: isMissingValue(record.mobile) ? identity.mobile : record.mobile,
+        };
+    });
+};
 
 const shiftScheduleSchema = new mongoose.Schema({
     employeeId: {
@@ -645,9 +772,20 @@ app.post("/register", async(req, res) => {
 
 app.post("/login", async(req, res) => {
     try {
-        const { email, password } = req.body;
+        const identifier = String(req.body.identifier || req.body.email || req.body.username || req.body.mobile || "").trim();
+        const { password } = req.body;
 
-        let user = await User.findOne({ email });
+        if (!identifier || !password) {
+            return res.status(400).json({ error: "Email/mobile/username and password are required" });
+        }
+
+        const user = await User.findOne({
+            $or: [
+                { email: identifier.toLowerCase() },
+                { username: identifier },
+                { mobile: identifier },
+            ],
+        });
 
         if (!user) return res.status(400).json({ error: "User not found" });
 
@@ -673,6 +811,8 @@ app.post("/login", async(req, res) => {
         res.json({
             token,
             username: user.username,
+            email: user.email,
+            mobile: user.mobile || "",
             currentQrVersion: user.currentQrVersion,
         });
     } catch (error) {
@@ -842,7 +982,7 @@ app.patch("/bookings/:id/done", verifyToken, async(req, res) => {
 // ANNOUNCEMENTS
 // ===========================
 
-app.get("/api/announcements/public", async(req, res) => {
+app.get("/api/announcements/public", verifyToken, async(req, res) => {
     try {
         const announcements = await Announcement.find({ type: "public" }).sort({
             createdAt: -1,
@@ -977,7 +1117,7 @@ app.post("/api/announcements", verifyAdmin, async(req, res) => {
             createdAt: new Date(),
         });
 
-        if (type === "employee") {
+        if (type === "employee" || type === "public") {
             emitRealtimeToAllEmployees("announcementCreated", {
                 message: title,
                 announcement,
@@ -2145,8 +2285,7 @@ app.get("/services", async(req, res) => {
 
 app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
     try {
-        const { userId, name, username, email, mobile, scanType, qrVersion } =
-        req.body;
+        const { userId, scanType, qrVersion } = req.body;
 
         if (!userId || !scanType || !qrVersion) {
             return res.status(400).json({
@@ -2155,7 +2294,7 @@ app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
             });
         }
 
-        const qrUser = await User.findById(userId);
+        const qrUser = await findUserByIdentifier(userId);
 
         if (!qrUser) {
             return res.status(400).json({
@@ -2176,24 +2315,29 @@ app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
             });
         }
 
+        const identity = getEmployeeIdentity(qrUser);
+        const employeeUserId = String(qrUser._id);
+
         const now = new Date();
         const today = now.toISOString().split("T")[0];
 
         let attendance = await Attendance.findOne({
-            userId,
+            userId: employeeUserId,
             date: today,
         });
 
         if (!attendance) {
             attendance = new Attendance({
-                userId,
-                name,
-                username,
-                email,
-                mobile,
+                userId: employeeUserId,
                 date: today,
             });
         }
+
+        attendance.userId = employeeUserId;
+        attendance.name = identity.name;
+        attendance.username = identity.username;
+        attendance.email = identity.email;
+        attendance.mobile = identity.mobile;
 
         let message = "";
 
@@ -2246,7 +2390,7 @@ app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
         emitRealtimeToAdmins("attendanceUpdated", {
             message,
             attendance,
-            username: attendance.username || username || "-",
+            username: attendance.username || identity.username || "-",
             scanType,
             createdAt: new Date(),
         });
@@ -2261,17 +2405,17 @@ app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
         await createAuditLog(req, {
             category: "Attendance",
             action: `SCAN_${scanType}`,
-            description: `${message} for ${username || name || email || userId}`,
+            description: `${message} for ${identity.username || identity.name || identity.email || employeeUserId}`,
             targetType: "Attendance",
             targetId: attendance._id,
-            targetName: username || name || email || String(userId),
-            metadata: { scanType, userId, date: attendance.date },
+            targetName: identity.username || identity.name || identity.email || String(employeeUserId),
+            metadata: { scanType, userId: employeeUserId, date: attendance.date },
         });
 
         res.status(201).json({
             success: true,
             message,
-            username,
+            username: attendance.username || identity.username,
             data: attendance,
         });
     } catch (error) {
@@ -2414,11 +2558,13 @@ app.get("/api/scan/attendance", verifyAdmin, async(req, res) => {
             Attendance.countDocuments(filter),
         ]);
 
+        const enrichedAttendance = await enrichAttendanceRecords(attendance);
+
         const totalPages = Math.max(Math.ceil(totalRecords / limit), 1);
 
         res.json({
             success: true,
-            data: attendance,
+            data: enrichedAttendance,
             pagination: {
                 page,
                 limit,
@@ -2456,9 +2602,11 @@ app.get("/api/my/attendance", verifyToken, async(req, res) => {
             ],
         }).sort({ createdAt: -1 });
 
+        const enrichedAttendance = await enrichAttendanceRecords(attendance);
+
         res.json({
             success: true,
-            data: attendance,
+            data: enrichedAttendance,
         });
     } catch (error) {
         res.status(500).json({
@@ -2616,9 +2764,15 @@ app.get("/api/attendance/summary", verifyAdmin, async(req, res) => {
             }),
         ]);
 
-        const weekSummary = summarizeAttendanceRecords(weekRecords);
-        const monthSummary = summarizeAttendanceRecords(monthRecords);
-        const todayPresentEmployees = new Set(todayRecords.map(buildEmployeeKey)).size;
+        const [enrichedWeekRecords, enrichedMonthRecords, enrichedTodayRecords] = await Promise.all([
+            enrichAttendanceRecords(weekRecords),
+            enrichAttendanceRecords(monthRecords),
+            enrichAttendanceRecords(todayRecords),
+        ]);
+
+        const weekSummary = summarizeAttendanceRecords(enrichedWeekRecords);
+        const monthSummary = summarizeAttendanceRecords(enrichedMonthRecords);
+        const todayPresentEmployees = new Set(enrichedTodayRecords.map(buildEmployeeKey)).size;
 
         const employeeMap = new Map();
 
@@ -2715,11 +2869,16 @@ app.get("/api/my/attendance/summary", verifyToken, async(req, res) => {
             }),
         ]);
 
+        const [enrichedWeekRecords, enrichedMonthRecords] = await Promise.all([
+            enrichAttendanceRecords(weekRecords),
+            enrichAttendanceRecords(monthRecords),
+        ]);
+
         res.json({
             success: true,
             data: {
-                week: summarizeAttendanceRecords(weekRecords),
-                month: summarizeAttendanceRecords(monthRecords),
+                week: summarizeAttendanceRecords(enrichedWeekRecords),
+                month: summarizeAttendanceRecords(enrichedMonthRecords),
                 ranges: {
                     weekStart: weekRange.start.toISOString(),
                     weekEnd: weekRange.end.toISOString(),
@@ -3143,11 +3302,13 @@ app.get("/api/attendance/analytics", verifyAdmin, async(req, res) => {
             ];
         }
 
-        const [attendanceRecords, schedules, totalEmployees] = await Promise.all([
+        let [attendanceRecords, schedules, totalEmployees] = await Promise.all([
             Attendance.find(attendanceFilter).sort({ createdAt: 1 }).limit(20000),
             ShiftSchedule.find({ date: { $gte: startKey, $lte: endKey } }).sort({ date: 1 }),
             User.countDocuments(),
         ]);
+
+        attendanceRecords = await enrichAttendanceRecords(attendanceRecords);
 
         const dailyTrends = buildAnalyticsDateList(start, end);
         const dailyMap = new Map(dailyTrends.map((day) => [day.date, day]));
