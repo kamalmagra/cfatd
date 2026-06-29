@@ -74,11 +74,24 @@ const Profile = () => {
                   Authorization: `Bearer ${token}`,
                 },
               }),
-              fetch("/api/shift-schedules/me?upcoming=true", {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-              }),
+              fetch(
+                `/api/shift-schedules/me?startDate=${(() => {
+                  const today = new Date();
+                  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+                  start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
+                  return start.toISOString().slice(0, 10);
+                })()}&endDate=${(() => {
+                  const today = new Date();
+                  const end = new Date(today.getFullYear(), today.getMonth() + 4, 0);
+                  end.setMinutes(end.getMinutes() - end.getTimezoneOffset());
+                  return end.toISOString().slice(0, 10);
+                })()}&limit=120`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                  },
+                }
+              ),
             ]);
 
           const attendanceData = await attendanceResponse.json();
@@ -431,12 +444,12 @@ Thank you.`;
 
           {messagesLoading ? (
             <p className="text-center text-gray-500 py-12">
-              Loading upcoming shifts...
+              Loading current and upcoming shifts...
             </p>
           ) : upcomingShifts.length === 0 ? (
             <div className="border border-dashed border-white/10 rounded-3xl py-12 text-center">
               <p className="text-gray-500">
-                No future shifts have been scheduled yet.
+                No current or upcoming shifts have been scheduled yet.
               </p>
             </div>
           ) : (

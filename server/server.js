@@ -61,6 +61,11 @@ const userSchema = new mongoose.Schema({
     email: String,
     mobile: String,
     password: String,
+    emailVerified: {
+        type: Boolean,
+        default: false,
+    },
+    emailVerifiedAt: Date,
     currentQrVersion: {
         type: String,
         default: "",
@@ -68,6 +73,47 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model("User", userSchema);
+const registrationOtpSchema = new mongoose.Schema({
+    username: String,
+    email: {
+        type: String,
+        required: true,
+        index: true,
+    },
+    mobile: String,
+    password: String,
+    otp: {
+        type: String,
+        required: true,
+    },
+    expiresAt: {
+        type: Date,
+        required: true,
+    },
+    verified: {
+        type: Boolean,
+        default: false,
+    },
+}, { timestamps: true });
+
+registrationOtpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const RegistrationOtp = mongoose.model(
+    "RegistrationOtp",
+    registrationOtpSchema
+);
+
+const normalizeEmail = (email = "") => {
+    return String(email || "").trim().toLowerCase();
+};
+
+const generateFourDigitOtp = () => {
+    return String(Math.floor(1000 + Math.random() * 9000));
+};
+
+const isValidEmail = (email = "") => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
+};
 
 const bookingSchema = new mongoose.Schema({
     username: String,
@@ -731,44 +777,174 @@ const sendEmail = async({ to, subject, text }) => {
 
     return { sent: true };
 };
-
-app.post("/register", async(req, res) => {
+app.post("/api/auth/send-registration-otp", async(req, res) => {
     try {
-        const { username, email, mobile, password } = req.body;
+        const username = String(req.body.username || "").trim();
+        const email = normalizeEmail(req.body.email);
+        const mobile = String(req.body.mobile || "").trim();
+        const password = String(req.body.password || "").trim();
 
         if (!username || !email || !password) {
-            return res.status(400).json({ error: "All fields required" });
+            return res.status(400).json({
+                success: false,
+                message: "Username, email and password are required",
+            });
         }
 
-        const existingUser = await User.findOne({ email });
+        if (!isValidEmail(email)) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter a valid email address",
+            });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 6 characters",
+            });
+        }
+
+        const existingUser = await User.findOne({
+            $or: [
+                { email },
+                { username },
+                ...(mobile ? [{ mobile }] : []),
+            ],
+        });
 
         if (existingUser) {
-            return res.status(400).json({ error: "Email already registered" });
+            return res.status(400).json({
+                success: false,
+                message: "User already exists with this email, username or mobile",
+            });
+        }
+
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+            return res.status(500).json({
+                success: false,
+                message: "Email OTP service is not configured. Add EMAIL_USER and EMAIL_PASS in .env",
+            });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
+        const otp = generateFourDigitOtp();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-        const firstQrVersion = generateQRVersion();
+        await RegistrationOtp.deleteMany({ email });
 
-        const newUser = new User({
+        await RegistrationOtp.create({
             username,
             email,
             mobile,
             password: hashedPassword,
+            otp,
+            expiresAt,
+        });
+
+        await sendEmail({
+            to: email,
+            subject: "Cargo Force Registration OTP",
+            text: `Your Cargo Force registration OTP is ${otp}. This OTP is valid for 10 minutes.
+
+Do not share this OTP with anyone.
+
+Cargo Force Administration`,
+        });
+
+        res.json({
+            success: true,
+            message: "OTP sent to your email. Please verify to complete registration.",
+        });
+    } catch (error) {
+        console.error("Send registration OTP error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to send registration OTP",
+        });
+    }
+});
+app.post("/register", async(req, res) => {
+    try {
+        const email = normalizeEmail(req.body.email);
+        const otp = String(req.body.otp || "").trim();
+
+        if (!email || !otp) {
+            return res.status(400).json({
+                success: false,
+                error: "Email and OTP are required",
+            });
+        }
+
+        if (!isValidEmail(email)) {
+            return res.status(400).json({
+                success: false,
+                error: "Please enter a valid email address",
+            });
+        }
+
+        const otpRecord = await RegistrationOtp.findOne({
+            email,
+            otp,
+            verified: false,
+            expiresAt: { $gt: new Date() },
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid or expired OTP",
+            });
+        }
+
+        const existingUser = await User.findOne({
+            $or: [
+                { email: otpRecord.email },
+                { username: otpRecord.username },
+                ...(otpRecord.mobile ? [{ mobile: otpRecord.mobile }] : []),
+            ],
+        });
+
+        if (existingUser) {
+            await RegistrationOtp.deleteMany({ email });
+            return res.status(400).json({
+                success: false,
+                error: "User already exists",
+            });
+        }
+
+        const firstQrVersion = generateQRVersion();
+
+        const newUser = new User({
+            username: otpRecord.username,
+            email: otpRecord.email,
+            mobile: otpRecord.mobile,
+            password: otpRecord.password,
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
             currentQrVersion: firstQrVersion,
         });
 
         await newUser.save();
 
+        otpRecord.verified = true;
+        await otpRecord.save();
+
+        await RegistrationOtp.deleteMany({ email });
+
         res.status(201).json({
-            message: "User registered successfully",
+            success: true,
+            message: "Email verified and user registered successfully",
         });
     } catch (error) {
+        console.error("Registration verify OTP error:", error);
         res.status(500).json({
+            success: false,
             error: "Registration failed",
         });
     }
 });
+
 
 app.post("/login", async(req, res) => {
     try {
@@ -1984,25 +2160,35 @@ app.get("/api/shift-schedules", verifyAdmin, async(req, res) => {
 
 app.get("/api/shift-schedules/me", verifyToken, async(req, res) => {
     try {
-        const { year, month, upcoming } = req.query;
+        const { year, month, upcoming, startDate, endDate, limit } = req.query;
         const filter = {
             employeeId: req.user.id,
         };
 
-        if (year && month) {
+        if (startDate || endDate) {
+            filter.date = {};
+
+            if (startDate) {
+                filter.date.$gte = String(startDate);
+            }
+
+            if (endDate) {
+                filter.date.$lte = String(endDate);
+            }
+        } else if (year && month) {
             filter.year = Number(year);
             filter.month = Number(month);
-        }
-
-        if (upcoming === "true") {
+        } else if (upcoming === "true") {
             filter.date = {
                 $gte: new Date().toISOString().slice(0, 10),
             };
         }
 
+        const maxLimit = Math.min(Math.max(parseInt(limit, 10) || (upcoming === "true" ? 90 : 370), 1), 370);
+
         const schedules = await ShiftSchedule.find(filter)
             .sort({ date: 1 })
-            .limit(upcoming === "true" ? 31 : 62);
+            .limit(maxLimit);
 
         res.json({
             success: true,
@@ -2161,6 +2347,247 @@ app.post("/api/shift-schedules/bulk", verifyAdmin, async(req, res) => {
         });
     }
 });
+
+
+// ===========================
+// DATE RANGE SHIFT ADD / UPDATE
+// Admin can add/update past and future shifts for one or multiple employees
+// ===========================
+
+const isValidDateString = (value) => {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+};
+
+const getDatesBetween = (startDate, endDate) => {
+    const dates = [];
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T00:00:00.000Z`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return dates;
+    }
+
+    if (start > end) {
+        return dates;
+    }
+
+    const current = new Date(start);
+
+    while (current <= end) {
+        dates.push({
+            date: current.toISOString().slice(0, 10),
+            year: current.getUTCFullYear(),
+            month: current.getUTCMonth() + 1,
+            dayOfWeek: current.getUTCDay(),
+        });
+
+        current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    return dates;
+};
+
+app.post("/api/shift-schedules/range-bulk", verifyAdmin, async(req, res) => {
+    try {
+        const {
+            employeeId,
+            employeeIds,
+            startDate,
+            endDate,
+            workingDays,
+            status = "working",
+            startTime = "",
+            breakStartTime = "",
+            breakEndTime = "",
+            endTime = "",
+            notes = "",
+        } = req.body;
+
+        const selectedEmployeeIds = Array.isArray(employeeIds) && employeeIds.length > 0 ?
+            employeeIds.filter(Boolean) :
+            employeeId ? [employeeId] : [];
+
+        if (selectedEmployeeIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Select at least one employee",
+            });
+        }
+
+        if (!isValidDateString(startDate) || !isValidDateString(endDate)) {
+            return res.status(400).json({
+                success: false,
+                message: "Start date and end date must be in YYYY-MM-DD format",
+            });
+        }
+
+        const dates = getDatesBetween(startDate, endDate);
+
+        if (dates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid date range",
+            });
+        }
+
+        if (dates.length > 370) {
+            return res.status(400).json({
+                success: false,
+                message: "Date range cannot be more than 370 days at once",
+            });
+        }
+
+        if (!["working", "off", "leave", "holiday"].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift status",
+            });
+        }
+
+        if (![startTime, breakStartTime, breakEndTime, endTime].every(isValidTime)) {
+            return res.status(400).json({
+                success: false,
+                message: "Shift times must use HH:MM format",
+            });
+        }
+
+        const selectedWorkingDays = Array.isArray(workingDays) && workingDays.length > 0 ? [...new Set(workingDays.map(Number))] : [0, 1, 2, 3, 4, 5, 6];
+
+        if (selectedWorkingDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
+            return res.status(400).json({
+                success: false,
+                message: "Working days must be between 0 and 6",
+            });
+        }
+
+        const validEmployeeIds = selectedEmployeeIds.filter((id) =>
+            mongoose.Types.ObjectId.isValid(String(id))
+        );
+
+        if (validEmployeeIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid employee id",
+            });
+        }
+
+        const employees = await User.find({
+            _id: { $in: validEmployeeIds },
+        }).select("_id username email");
+
+        if (employees.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No employees found",
+            });
+        }
+
+        const operations = [];
+
+        employees.forEach((employee) => {
+            dates.forEach((dateInfo) => {
+                const isSelectedDay = selectedWorkingDays.includes(dateInfo.dayOfWeek);
+                const finalStatus = isSelectedDay ? status : "off";
+                const isWorking = finalStatus === "working";
+
+                operations.push({
+                    updateOne: {
+                        filter: {
+                            employeeId: employee._id,
+                            date: dateInfo.date,
+                        },
+                        update: {
+                            $set: {
+                                employeeUsername: employee.username,
+                                employeeEmail: employee.email || "",
+                                year: dateInfo.year,
+                                month: dateInfo.month,
+                                dayOfWeek: dateInfo.dayOfWeek,
+                                status: finalStatus,
+                                startTime: isWorking ? startTime : "",
+                                breakStartTime: isWorking ? breakStartTime : "",
+                                breakEndTime: isWorking ? breakEndTime : "",
+                                endTime: isWorking ? endTime : "",
+                                notes: isSelectedDay ? notes : "",
+                                createdBy: req.admin.username || "Admin",
+                            },
+                            $setOnInsert: {
+                                employeeId: employee._id,
+                                date: dateInfo.date,
+                            },
+                        },
+                        upsert: true,
+                    },
+                });
+            });
+        });
+
+        const result = await ShiftSchedule.bulkWrite(operations);
+
+        await createAuditLog(req, {
+            category: "Shifts",
+            action: "RANGE_BULK_SHIFT_UPDATE",
+            description: `Updated shift range ${startDate} to ${endDate} for ${employees.length} employee(s)`,
+            targetType: "ShiftSchedule",
+            targetName: `${startDate} to ${endDate}`,
+            metadata: {
+                employeeIds: employees.map((employee) => String(employee._id)),
+                startDate,
+                endDate,
+                workingDays: selectedWorkingDays,
+                status,
+                startTime,
+                endTime,
+                totalOperations: operations.length,
+                matchedCount: result.matchedCount || 0,
+                modifiedCount: result.modifiedCount || 0,
+                upsertedCount: result.upsertedCount || 0,
+            },
+        });
+
+        employees.forEach((employee) => {
+            emitRealtimeToEmployee([employee._id, employee.email, employee.username], "myShiftUpdated", {
+                message: "Your shift schedule was updated",
+                startDate,
+                endDate,
+                createdAt: new Date(),
+            });
+        });
+
+        emitRealtimeToAdmins("shiftScheduleUpdated", {
+            message: `Shift range updated for ${employees.length} employee(s)`,
+            startDate,
+            endDate,
+            employees: employees.map((employee) => ({
+                _id: employee._id,
+                username: employee.username,
+                email: employee.email,
+            })),
+            createdAt: new Date(),
+        });
+
+        res.json({
+            success: true,
+            message: `Shift updated successfully from ${startDate} to ${endDate}`,
+            stats: {
+                employees: employees.length,
+                dates: dates.length,
+                totalOperations: operations.length,
+                matchedCount: result.matchedCount || 0,
+                modifiedCount: result.modifiedCount || 0,
+                upsertedCount: result.upsertedCount || 0,
+            },
+        });
+    } catch (error) {
+        console.error("Range bulk shift update error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update shift range",
+            error: error.message,
+        });
+    }
+});
+
 
 app.put("/api/shift-schedules/:id", verifyAdmin, async(req, res) => {
     try {

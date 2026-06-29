@@ -36,6 +36,20 @@ const initialShift = {
   notes: "",
 };
 
+const initialRangeShift = {
+  employeeIds: [],
+  applyToAll: false,
+  startDate: "",
+  endDate: "",
+  workingDays: [1, 2, 3, 4, 5],
+  status: "working",
+  startTime: "09:00",
+  breakStartTime: "13:00",
+  breakEndTime: "14:00",
+  endTime: "17:00",
+  notes: "",
+};
+
 const initialEdit = {
   status: "working",
   startTime: "",
@@ -45,19 +59,42 @@ const initialEdit = {
   notes: "",
 };
 
+const getDateInputValue = (date) => {
+  const nextDate = new Date(date);
+  nextDate.setMinutes(nextDate.getMinutes() - nextDate.getTimezoneOffset());
+  return nextDate.toISOString().slice(0, 10);
+};
+
+const getNextMonthRange = () => {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+
+  return {
+    startDate: getDateInputValue(first),
+    endDate: getDateInputValue(last),
+  };
+};
+
 const AdminShiftPlanner = () => {
   const now = new Date();
   const navigate = useNavigate();
+  const nextMonthRange = useMemo(() => getNextMonthRange(), []);
 
   const [employees, setEmployees] = useState([]);
   const [employeeId, setEmployeeId] = useState("");
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [shift, setShift] = useState(initialShift);
+  const [rangeShift, setRangeShift] = useState({
+    ...initialRangeShift,
+    ...nextMonthRange,
+  });
   const [schedules, setSchedules] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [savingMonth, setSavingMonth] = useState(false);
+  const [savingRange, setSavingRange] = useState(false);
   const [editSchedule, setEditSchedule] = useState(null);
   const [editForm, setEditForm] = useState(initialEdit);
   const [savingDate, setSavingDate] = useState(false);
@@ -98,13 +135,16 @@ const AdminShiftPlanner = () => {
 
       if (employeeList.length > 0) {
         setEmployeeId((current) => current || employeeList[0]._id);
+        setRangeShift((current) => ({
+          ...current,
+          employeeIds:
+            current.employeeIds.length > 0 ? current.employeeIds : [employeeList[0]._id],
+        }));
       }
     } catch (error) {
       console.error("Employee load error:", error);
       if (!handleAuthError(error)) {
-        showError(
-          error.response?.data?.message || "Unable to load employees."
-        );
+        showError(error.response?.data?.message || "Unable to load employees.");
       }
     } finally {
       setLoadingEmployees(false);
@@ -129,9 +169,7 @@ const AdminShiftPlanner = () => {
     } catch (error) {
       console.error("Schedule load error:", error);
       if (!handleAuthError(error)) {
-        showError(
-          error.response?.data?.message || "Unable to load monthly shifts."
-        );
+        showError(error.response?.data?.message || "Unable to load monthly shifts.");
       }
     } finally {
       setLoadingCalendar(false);
@@ -151,27 +189,21 @@ const AdminShiftPlanner = () => {
     fetchSchedules();
   }, [fetchSchedules]);
 
-  const selectedEmployee = employees.find(
-    (employee) => employee._id === employeeId
-  );
+  const selectedEmployee = employees.find((employee) => employee._id === employeeId);
 
   const yearOptions = useMemo(() => {
     const currentYear = now.getFullYear();
-    return Array.from({ length: 12 }, (_, index) => currentYear - 1 + index);
+    return Array.from({ length: 12 }, (_, index) => currentYear - 3 + index);
   }, []);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
     const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    const scheduleByDate = new Map(
-      schedules.map((schedule) => [schedule.date, schedule])
-    );
+    const scheduleByDate = new Map(schedules.map((schedule) => [schedule.date, schedule]));
     const cells = Array.from({ length: firstDay }, () => null);
 
     for (let day = 1; day <= daysInMonth; day += 1) {
-      const date = `${year}-${String(month).padStart(2, "0")}-${String(
-        day
-      ).padStart(2, "0")}`;
+      const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 
       cells.push({
         day,
@@ -207,9 +239,40 @@ const AdminShiftPlanner = () => {
     }));
   };
 
+  const toggleRangeWorkingDay = (day) => {
+    setRangeShift((current) => ({
+      ...current,
+      workingDays: current.workingDays.includes(day)
+        ? current.workingDays.filter((value) => value !== day)
+        : [...current.workingDays, day].sort(),
+    }));
+  };
+
   const updateShiftField = (event) => {
     const { name, value } = event.target;
     setShift((current) => ({ ...current, [name]: value }));
+  };
+
+  const updateRangeField = (event) => {
+    const { name, value } = event.target;
+    setRangeShift((current) => ({ ...current, [name]: value }));
+  };
+
+  const toggleRangeEmployee = (id) => {
+    setRangeShift((current) => ({
+      ...current,
+      employeeIds: current.employeeIds.includes(id)
+        ? current.employeeIds.filter((value) => value !== id)
+        : [...current.employeeIds, id],
+    }));
+  };
+
+  const toggleApplyToAll = () => {
+    setRangeShift((current) => ({
+      ...current,
+      applyToAll: !current.applyToAll,
+      employeeIds: !current.applyToAll ? employees.map((employee) => employee._id) : [],
+    }));
   };
 
   const applyMonthlyShift = async (event) => {
@@ -245,16 +308,78 @@ const AdminShiftPlanner = () => {
       );
 
       setSchedules(response.data.data || []);
-      showSuccess(
-        response.data.message || "Monthly shift updated successfully."
-      );
+      showSuccess(response.data.message || "Monthly shift updated successfully.");
     } catch (error) {
       console.error("Monthly shift update error:", error);
-      showError(
-        error.response?.data?.message || "Unable to update monthly shift."
-      );
+      if (!handleAuthError(error)) {
+        showError(error.response?.data?.message || "Unable to update monthly shift.");
+      }
     } finally {
       setSavingMonth(false);
+    }
+  };
+
+  const applyRangeShift = async (event) => {
+    event.preventDefault();
+
+    const selectedIds = rangeShift.applyToAll
+      ? employees.map((employee) => employee._id)
+      : rangeShift.employeeIds;
+
+    if (selectedIds.length === 0) {
+      showError("Please select at least one employee.");
+      return;
+    }
+
+    if (!rangeShift.startDate || !rangeShift.endDate) {
+      showError("Please select start and end date.");
+      return;
+    }
+
+    if (new Date(rangeShift.startDate) > new Date(rangeShift.endDate)) {
+      showError("Start date cannot be after end date.");
+      return;
+    }
+
+    if (rangeShift.workingDays.length === 0) {
+      showError("Please select at least one weekday.");
+      return;
+    }
+
+    try {
+      setSavingRange(true);
+
+      const response = await axios.post(
+        "/api/shift-schedules/range-bulk",
+        {
+          employeeIds: selectedIds,
+          startDate: rangeShift.startDate,
+          endDate: rangeShift.endDate,
+          workingDays: rangeShift.workingDays,
+          status: rangeShift.status,
+          startTime: rangeShift.startTime,
+          breakStartTime: rangeShift.breakStartTime,
+          breakEndTime: rangeShift.breakEndTime,
+          endTime: rangeShift.endTime,
+          notes: rangeShift.notes,
+        },
+        {
+          headers: {
+            ...headers(),
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      showSuccess(response.data.message || "Shift range updated successfully.");
+      fetchSchedules();
+    } catch (error) {
+      console.error("Range shift update error:", error);
+      if (!handleAuthError(error)) {
+        showError(error.response?.data?.message || "Unable to update shift range.");
+      }
+    } finally {
+      setSavingRange(false);
     }
   };
 
@@ -272,15 +397,24 @@ const AdminShiftPlanner = () => {
     });
   };
 
-  const saveDateShift = async () => {
-    if (!editSchedule) return;
+  const createSingleDateShift = async (date) => {
+    if (!employeeId || !date) return;
 
     try {
-      setSavingDate(true);
-
-      const response = await axios.put(
-        `/api/shift-schedules/${editSchedule._id}`,
-        editForm,
+      const response = await axios.post(
+        "/api/shift-schedules/range-bulk",
+        {
+          employeeIds: [employeeId],
+          startDate: date,
+          endDate: date,
+          workingDays: [new Date(`${date}T00:00:00.000Z`).getUTCDay()],
+          status: "working",
+          startTime: shift.startTime,
+          breakStartTime: shift.breakStartTime,
+          breakEndTime: shift.breakEndTime,
+          endTime: shift.endTime,
+          notes: shift.notes || "Single day shift",
+        },
         {
           headers: {
             ...headers(),
@@ -289,19 +423,40 @@ const AdminShiftPlanner = () => {
         }
       );
 
+      showSuccess(response.data.message || "Single date shift created.");
+      fetchSchedules();
+    } catch (error) {
+      console.error("Single date shift create error:", error);
+      if (!handleAuthError(error)) {
+        showError(error.response?.data?.message || "Unable to create this date shift.");
+      }
+    }
+  };
+
+  const saveDateShift = async () => {
+    if (!editSchedule) return;
+
+    try {
+      setSavingDate(true);
+
+      const response = await axios.put(`/api/shift-schedules/${editSchedule._id}`, editForm, {
+        headers: {
+          ...headers(),
+          "Content-Type": "application/json",
+        },
+      });
+
       setSchedules((current) =>
-        current.map((item) =>
-          item._id === editSchedule._id ? response.data.data : item
-        )
+        current.map((item) => (item._id === editSchedule._id ? response.data.data : item))
       );
 
       setEditSchedule(null);
       showSuccess(response.data.message || "Shift date updated.");
     } catch (error) {
       console.error("Date shift update error:", error);
-      showError(
-        error.response?.data?.message || "Unable to update this shift date."
-      );
+      if (!handleAuthError(error)) {
+        showError(error.response?.data?.message || "Unable to update this shift date.");
+      }
     } finally {
       setSavingDate(false);
     }
@@ -328,9 +483,9 @@ const AdminShiftPlanner = () => {
       showSuccess(response.data.message || "Monthly shift deleted.");
     } catch (error) {
       console.error("Monthly shift delete error:", error);
-      showError(
-        error.response?.data?.message || "Unable to delete monthly shift."
-      );
+      if (!handleAuthError(error)) {
+        showError(error.response?.data?.message || "Unable to delete monthly shift.");
+      }
     }
   };
 
@@ -347,6 +502,54 @@ const AdminShiftPlanner = () => {
     return "border-white/10 bg-white/5 text-gray-500";
   };
 
+  const renderShiftTimeFields = (source, handler) => (
+    <div className="grid grid-cols-2 gap-3">
+      <div>
+        <label className="mb-2 block text-xs font-semibold text-gray-500">Start</label>
+        <input
+          type="time"
+          name="startTime"
+          value={source.startTime}
+          onChange={handler}
+          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-xs font-semibold text-gray-500">Break Out</label>
+        <input
+          type="time"
+          name="breakStartTime"
+          value={source.breakStartTime}
+          onChange={handler}
+          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-xs font-semibold text-gray-500">Break In</label>
+        <input
+          type="time"
+          name="breakEndTime"
+          value={source.breakEndTime}
+          onChange={handler}
+          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-xs font-semibold text-gray-500">End</label>
+        <input
+          type="time"
+          name="endTime"
+          value={source.endTime}
+          onChange={handler}
+          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <section className="min-h-screen bg-black px-4 py-8 text-white">
       <div className="mx-auto max-w-7xl">
@@ -354,13 +557,11 @@ const AdminShiftPlanner = () => {
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#111] px-4 py-2">
               <span className="h-2 w-2 rounded-full bg-green-400" />
-              <span className="text-sm text-gray-400">
-                Future Shift Scheduling
-              </span>
+              <span className="text-sm text-gray-400">Past & Future Shift Scheduling</span>
             </div>
 
             <h1 className="text-4xl font-extrabold md:text-6xl">
-              Monthly Shift
+              Shift
               <span className="block text-gray-500">Planner</span>
             </h1>
           </div>
@@ -384,366 +585,438 @@ const AdminShiftPlanner = () => {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 gap-7 xl:grid-cols-[390px_1fr]">
-          <form
-            onSubmit={applyMonthlyShift}
-            className="h-fit rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl"
-          >
-            <p className="text-sm text-gray-500">Bulk Schedule</p>
-            <h2 className="mb-6 text-2xl font-bold">
-              Set Full Month Shift
-            </h2>
+        <div className="grid grid-cols-1 gap-7 xl:grid-cols-[410px_1fr]">
+          <div className="space-y-7">
+            <form
+              onSubmit={applyMonthlyShift}
+              className="h-fit rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl"
+            >
+              <p className="text-sm text-gray-500">Month Schedule</p>
+              <h2 className="mb-6 text-2xl font-bold">Set Full Month Shift</h2>
 
-            <div className="mb-5">
-              <label className="mb-2 block text-sm font-semibold text-gray-300">
-                Employee
-              </label>
-
-              <select
-                value={employeeId}
-                onChange={(event) => setEmployeeId(event.target.value)}
-                disabled={loadingEmployees}
-                className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-4 text-white"
-              >
-                {employees.length === 0 && (
-                  <option value="">No employees found</option>
-                )}
-
-                {employees.map((employee) => (
-                  <option key={employee._id} value={employee._id}>
-                    {employee.username} - {employee.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="mb-5 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-300">
-                  Month
-                </label>
+              <div className="mb-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-500">Employee</label>
                 <select
-                  value={month}
-                  onChange={(event) => setMonth(Number(event.target.value))}
-                  className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-4 text-white"
+                  value={employeeId}
+                  onChange={(event) => setEmployeeId(event.target.value)}
+                  disabled={loadingEmployees}
+                  className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
                 >
-                  {MONTHS.map((name, index) => (
-                    <option key={name} value={index + 1}>
-                      {name}
-                    </option>
-                  ))}
+                  {loadingEmployees ? (
+                    <option>Loading employees...</option>
+                  ) : employees.length === 0 ? (
+                    <option>No employees found</option>
+                  ) : (
+                    employees.map((employee) => (
+                      <option key={employee._id} value={employee._id}>
+                        {employee.username} - {employee.email}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-300">
-                  Year
-                </label>
-                <select
-                  value={year}
-                  onChange={(event) => setYear(Number(event.target.value))}
-                  className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-4 text-white"
-                >
-                  {yearOptions.map((yearValue) => (
-                    <option key={yearValue} value={yearValue}>
-                      {yearValue}
-                    </option>
-                  ))}
-                </select>
+              <div className="mb-5 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">Month</label>
+                  <select
+                    value={month}
+                    onChange={(event) => setMonth(Number(event.target.value))}
+                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                  >
+                    {MONTHS.map((name, index) => (
+                      <option key={name} value={index + 1}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">Year</label>
+                  <select
+                    value={year}
+                    onChange={(event) => setYear(Number(event.target.value))}
+                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                  >
+                    {yearOptions.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
 
-            <div className="mb-5">
-              <label className="mb-3 block text-sm font-semibold text-gray-300">
-                Working Weekdays
-              </label>
-
-              <div className="grid grid-cols-4 gap-2">
-                {DAYS.map((day) => {
-                  const selected = shift.workingDays.includes(day.value);
-
-                  return (
+              <div className="mb-5">
+                <label className="mb-3 block text-sm font-semibold text-gray-500">Working Days</label>
+                <div className="grid grid-cols-7 gap-2">
+                  {DAYS.map((day) => (
                     <button
-                      key={day.value}
                       type="button"
-                      title={day.label}
+                      key={day.value}
                       onClick={() => toggleWorkingDay(day.value)}
-                      className={`rounded-xl border px-2 py-3 text-sm font-bold transition ${
-                        selected
-                          ? "border-green-500 bg-green-500/15 text-green-300"
-                          : "border-white/10 bg-[#111] text-gray-600"
+                      className={`rounded-2xl border px-2 py-3 text-xs font-bold transition ${
+                        shift.workingDays.includes(day.value)
+                          ? "border-green-500/40 bg-green-500/15 text-green-300"
+                          : "border-white/10 bg-[#111] text-gray-500"
                       }`}
                     >
                       {day.short}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
 
-            <div className="mb-5 grid grid-cols-2 gap-3">
-              {[
-                ["startTime", "Start Time"],
-                ["breakStartTime", "Break Start"],
-                ["breakEndTime", "Break End"],
-                ["endTime", "End Time"],
-              ].map(([name, label]) => (
-                <div key={name}>
-                  <label className="mb-2 block text-xs font-semibold text-gray-400">
-                    {label}
-                  </label>
+              <div className="mb-5">{renderShiftTimeFields(shift, updateShiftField)}</div>
+
+              <div className="mb-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-500">Notes</label>
+                <textarea
+                  name="notes"
+                  value={shift.notes}
+                  onChange={updateShiftField}
+                  rows="3"
+                  placeholder="Example: Regular morning shift"
+                  className="w-full resize-none rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={savingMonth || loadingEmployees}
+                className="w-full rounded-2xl bg-white px-5 py-4 font-bold text-black hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingMonth ? "Saving..." : "Apply Full Month"}
+              </button>
+
+              <p className="mt-3 text-xs text-gray-600">
+                This can update past, current, or future month for selected employee.
+              </p>
+            </form>
+
+            <form
+              onSubmit={applyRangeShift}
+              className="h-fit rounded-[30px] border border-blue-500/20 bg-blue-500/5 p-6 shadow-2xl"
+            >
+              <p className="text-sm text-blue-300">New Update</p>
+              <h2 className="mb-6 text-2xl font-bold">Date Range Shift</h2>
+
+              <div className="mb-5 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">Start Date</label>
                   <input
-                    type="time"
-                    name={name}
-                    value={shift[name]}
-                    onChange={updateShiftField}
-                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-3 py-3 text-white"
+                    type="date"
+                    name="startDate"
+                    value={rangeShift.startDate}
+                    onChange={updateRangeField}
+                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
                   />
                 </div>
-              ))}
-            </div>
 
-            <div className="mb-6">
-              <label className="mb-2 block text-sm font-semibold text-gray-300">
-                Monthly Note
-              </label>
-              <textarea
-                name="notes"
-                value={shift.notes}
-                onChange={updateShiftField}
-                rows={3}
-                maxLength={500}
-                placeholder="Optional shift note..."
-                className="w-full resize-none rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white placeholder:text-gray-600"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={savingMonth || !employeeId}
-              className="w-full rounded-2xl bg-green-600 px-5 py-4 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {savingMonth
-                ? "Updating Full Month..."
-                : "Apply Shift to Full Month"}
-            </button>
-
-            <p className="mt-4 text-xs leading-5 text-gray-600">
-              Selected weekdays become working shifts. Other days become
-              scheduled days off. Existing dates in this month are updated.
-            </p>
-          </form>
-
-          <main className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-              {[
-                ["Working", stats.working, "text-green-400"],
-                ["Off", stats.off, "text-gray-400"],
-                ["Leave", stats.leave, "text-yellow-400"],
-                ["Holiday", stats.holiday, "text-purple-400"],
-                ["Total Days", stats.total, "text-white"],
-              ].map(([label, value, color]) => (
-                <div
-                  key={label}
-                  className="rounded-3xl border border-white/10 bg-[#111] p-5"
-                >
-                  <p className="text-sm text-gray-500">{label}</p>
-                  <p className={`mt-2 text-3xl font-bold ${color}`}>{value}</p>
-                </div>
-              ))}
-            </div>
-
-            <section className="rounded-[30px] border border-white/10 bg-[#050505] p-5 shadow-2xl md:p-6">
-              <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">
-                    {selectedEmployee?.username || "Select employee"}
-                  </p>
-                  <h2 className="text-2xl font-bold">
-                    {MONTHS[month - 1]} {year}
-                  </h2>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">End Date</label>
+                  <input
+                    type="date"
+                    name="endDate"
+                    value={rangeShift.endDate}
+                    onChange={updateRangeField}
+                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                  />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={deleteMonth}
-                  disabled={schedules.length === 0}
-                  className="rounded-2xl bg-red-500/10 px-4 py-3 font-semibold text-red-400 hover:bg-red-500/20 disabled:opacity-40"
-                >
-                  Delete This Month
-                </button>
               </div>
 
-              {loadingCalendar ? (
-                <p className="py-24 text-center text-gray-500">
-                  Loading monthly calendar...
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <div className="min-w-[850px]">
-                    <div className="mb-2 grid grid-cols-7 gap-2">
-                      {DAYS.map((day) => (
-                        <div
-                          key={day.value}
-                          className="px-2 py-3 text-center text-sm font-bold text-gray-500"
-                        >
-                          {day.label}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-7 gap-2">
-                      {calendarDays.map((cell, index) =>
-                        cell ? (
-                          <button
-                            key={cell.date}
-                            type="button"
-                            onClick={() => openDateEditor(cell.schedule)}
-                            disabled={!cell.schedule}
-                            className={`min-h-[150px] rounded-2xl border p-3 text-left transition ${
-                              cell.schedule
-                                ? `${statusClass(
-                                    cell.schedule.status
-                                  )} hover:-translate-y-0.5`
-                                : "border-dashed border-white/10 bg-[#0b0b0b] text-gray-700"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="text-lg font-extrabold">
-                                {cell.day}
-                              </span>
-
-                              <span className="text-[10px] font-bold uppercase">
-                                {cell.schedule?.status || "Not set"}
-                              </span>
-                            </div>
-
-                            {cell.schedule?.status === "working" && (
-                              <div className="mt-4 space-y-1 text-xs">
-                                <p>
-                                  {cell.schedule.startTime || "-"} -{" "}
-                                  {cell.schedule.endTime || "-"}
-                                </p>
-                                <p className="opacity-70">
-                                  Break:{" "}
-                                  {cell.schedule.breakStartTime || "-"} -{" "}
-                                  {cell.schedule.breakEndTime || "-"}
-                                </p>
-                              </div>
-                            )}
-
-                            {cell.schedule?.notes && (
-                              <p className="mt-3 line-clamp-2 text-[11px] opacity-70">
-                                {cell.schedule.notes}
-                              </p>
-                            )}
-                          </button>
-                        ) : (
-                          <div
-                            key={`empty-${index}`}
-                            className="min-h-[150px] rounded-2xl border border-transparent"
-                          />
-                        )
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-          </main>
-        </div>
-
-        {editSchedule && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl">
-              <p className="text-sm text-gray-500">Individual Date</p>
-              <h2 className="text-3xl font-bold">Edit {editSchedule.date}</h2>
-
-              <div className="mt-6">
-                <label className="mb-2 block text-sm font-semibold text-gray-300">
-                  Status
-                </label>
+              <div className="mb-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-500">Shift Status</label>
                 <select
-                  value={editForm.status}
-                  onChange={(event) =>
-                    setEditForm((current) => ({
-                      ...current,
-                      status: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-4 text-white"
+                  name="status"
+                  value={rangeShift.status}
+                  onChange={updateRangeField}
+                  className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
                 >
                   <option value="working">Working</option>
-                  <option value="off">Day Off</option>
+                  <option value="off">Off</option>
                   <option value="leave">Leave</option>
                   <option value="holiday">Holiday</option>
                 </select>
               </div>
 
-              {editForm.status === "working" && (
-                <div className="mt-5 grid grid-cols-2 gap-4">
-                  {[
-                    ["startTime", "Start Time"],
-                    ["breakStartTime", "Break Start"],
-                    ["breakEndTime", "Break End"],
-                    ["endTime", "End Time"],
-                  ].map(([name, label]) => (
-                    <div key={name}>
-                      <label className="mb-2 block text-sm text-gray-400">
-                        {label}
-                      </label>
-                      <input
-                        type="time"
-                        value={editForm[name]}
-                        onChange={(event) =>
-                          setEditForm((current) => ({
-                            ...current,
-                            [name]: event.target.value,
-                          }))
-                        }
-                        className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
-                      />
-                    </div>
+              <div className="mb-5">
+                <label className="mb-3 block text-sm font-semibold text-gray-500">Apply On Days</label>
+                <div className="grid grid-cols-7 gap-2">
+                  {DAYS.map((day) => (
+                    <button
+                      type="button"
+                      key={day.value}
+                      onClick={() => toggleRangeWorkingDay(day.value)}
+                      className={`rounded-2xl border px-2 py-3 text-xs font-bold transition ${
+                        rangeShift.workingDays.includes(day.value)
+                          ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                          : "border-white/10 bg-[#111] text-gray-500"
+                      }`}
+                    >
+                      {day.short}
+                    </button>
                   ))}
                 </div>
+              </div>
+
+              {rangeShift.status === "working" && (
+                <div className="mb-5">{renderShiftTimeFields(rangeShift, updateRangeField)}</div>
               )}
 
-              <div className="mt-5">
-                <label className="mb-2 block text-sm text-gray-400">
-                  Date Note
-                </label>
+              <div className="mb-5">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <label className="block text-sm font-semibold text-gray-500">Employees</label>
+                  <button
+                    type="button"
+                    onClick={toggleApplyToAll}
+                    className="rounded-xl border border-white/10 bg-[#111] px-3 py-2 text-xs font-bold text-gray-300 hover:bg-white/10"
+                  >
+                    {rangeShift.applyToAll ? "Clear All" : "Select All"}
+                  </button>
+                </div>
+
+                <div className="max-h-44 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-[#111] p-3">
+                  {employees.map((employee) => {
+                    const selected = rangeShift.employeeIds.includes(employee._id);
+
+                    return (
+                      <label
+                        key={employee._id}
+                        className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${
+                          selected ? "border-blue-500/30 bg-blue-500/10" : "border-white/10 bg-black/20"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleRangeEmployee(employee._id)}
+                        />
+                        <span className="text-sm">
+                          <span className="font-semibold">{employee.username}</span>
+                          <span className="block text-xs text-gray-500">{employee.email}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mb-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-500">Notes</label>
                 <textarea
-                  value={editForm.notes}
-                  onChange={(event) =>
-                    setEditForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  rows={3}
-                  maxLength={500}
-                  className="w-full resize-none rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
+                  name="notes"
+                  value={rangeShift.notes}
+                  onChange={updateRangeField}
+                  rows="3"
+                  placeholder="Example: Next month full shift"
+                  className="w-full resize-none rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
                 />
               </div>
 
-              <div className="mt-6 flex gap-3">
-                <button
-                  type="button"
-                  onClick={saveDateShift}
-                  disabled={savingDate}
-                  className="flex-1 rounded-2xl bg-white py-3 font-bold text-black hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {savingDate ? "Saving..." : "Save Date"}
-                </button>
+              <button
+                type="submit"
+                disabled={savingRange || loadingEmployees}
+                className="w-full rounded-2xl bg-blue-500 px-5 py-4 font-bold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingRange ? "Updating Range..." : "Apply Past/Future Range"}
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => setEditSchedule(null)}
-                  disabled={savingDate}
-                  className="flex-1 rounded-2xl bg-red-500/10 py-3 font-bold text-red-400 hover:bg-red-500/20"
-                >
-                  Cancel
-                </button>
+              <p className="mt-3 text-xs text-gray-500">
+                Use this for next month, previous month, or custom date range. Existing shifts will update automatically.
+              </p>
+            </form>
+          </div>
+
+          <div className="rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl">
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm text-gray-500">
+                  {selectedEmployee?.username || "Employee"} - {MONTHS[month - 1]} {year}
+                </p>
+                <h2 className="text-3xl font-bold">Shift Calendar</h2>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-sm">
+                <span className="rounded-full bg-green-500/10 px-3 py-1 text-green-300">
+                  Working: {stats.working || 0}
+                </span>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-gray-300">
+                  Off: {stats.off || 0}
+                </span>
+                <span className="rounded-full bg-yellow-500/10 px-3 py-1 text-yellow-300">
+                  Leave: {stats.leave || 0}
+                </span>
+                <span className="rounded-full bg-purple-500/10 px-3 py-1 text-purple-300">
+                  Holiday: {stats.holiday || 0}
+                </span>
+              </div>
+            </div>
+
+            {loadingCalendar ? (
+              <div className="py-20 text-center text-gray-500">Loading calendar...</div>
+            ) : (
+              <>
+                <div className="mb-3 grid grid-cols-7 gap-2">
+                  {DAYS.map((day) => (
+                    <div key={day.value} className="text-center text-xs font-bold uppercase text-gray-500">
+                      {day.short}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-2">
+                  {calendarDays.map((cell, index) => {
+                    if (!cell) {
+                      return <div key={`empty-${index}`} className="min-h-28 rounded-3xl border border-white/5 bg-black/20" />;
+                    }
+
+                    const schedule = cell.schedule;
+
+                    return (
+                      <button
+                        type="button"
+                        key={cell.date}
+                        onClick={() => (schedule ? openDateEditor(schedule) : createSingleDateShift(cell.date))}
+                        className={`min-h-28 rounded-3xl border p-3 text-left transition hover:scale-[1.01] ${
+                          schedule ? statusClass(schedule.status) : "border-white/10 bg-[#111] text-gray-500"
+                        }`}
+                      >
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <span className="text-lg font-bold">{cell.day}</span>
+                          <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] font-bold uppercase">
+                            {schedule?.status || "Add"}
+                          </span>
+                        </div>
+
+                        {schedule ? (
+                          <div className="space-y-1 text-xs">
+                            {schedule.status === "working" ? (
+                              <>
+                                <p className="font-semibold">
+                                  {schedule.startTime || "-"} - {schedule.endTime || "-"}
+                                </p>
+                                <p className="text-gray-400">
+                                  Break: {schedule.breakStartTime || "-"} - {schedule.breakEndTime || "-"}
+                                </p>
+                              </>
+                            ) : (
+                              <p className="font-semibold capitalize">{schedule.status}</p>
+                            )}
+
+                            {schedule.notes && (
+                              <p className="line-clamp-2 text-gray-500">{schedule.notes}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600">Click to add one day</p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-gray-500">
+                Total scheduled days in this month: {stats.total}
+              </p>
+
+              <button
+                type="button"
+                onClick={deleteMonth}
+                disabled={!employeeId || schedules.length === 0}
+                className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-3 font-bold text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Delete This Month
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {editSchedule && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
+            <div className="w-full max-w-lg rounded-[30px] border border-white/10 bg-[#050505] p-6 shadow-2xl">
+              <div className="mb-6">
+                <p className="text-sm text-gray-500">Edit Date Shift</p>
+                <h2 className="text-2xl font-bold">{editSchedule.date}</h2>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">Status</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, status: event.target.value }))
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                  >
+                    <option value="working">Working</option>
+                    <option value="off">Off</option>
+                    <option value="leave">Leave</option>
+                    <option value="holiday">Holiday</option>
+                  </select>
+                </div>
+
+                {editForm.status === "working" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {["startTime", "breakStartTime", "breakEndTime", "endTime"].map((field) => (
+                      <div key={field}>
+                        <label className="mb-2 block text-xs font-semibold text-gray-500">
+                          {field === "startTime"
+                            ? "Start"
+                            : field === "breakStartTime"
+                            ? "Break Out"
+                            : field === "breakEndTime"
+                            ? "Break In"
+                            : "End"}
+                        </label>
+                        <input
+                          type="time"
+                          value={editForm[field]}
+                          onChange={(event) =>
+                            setEditForm((current) => ({ ...current, [field]: event.target.value }))
+                          }
+                          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-500">Notes</label>
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    rows="3"
+                    className="w-full resize-none rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={saveDateShift}
+                    disabled={savingDate}
+                    className="flex-1 rounded-2xl bg-white px-5 py-3 font-bold text-black hover:bg-gray-200 disabled:opacity-60"
+                  >
+                    {savingDate ? "Saving..." : "Save"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditSchedule(null)}
+                    className="flex-1 rounded-2xl border border-white/10 bg-[#111] px-5 py-3 font-bold text-white hover:bg-white/10"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
