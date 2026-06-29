@@ -47,6 +47,13 @@ function AdminDashboard() {
     lastOutTime: "",
   });
 
+  const [whatsappImportText, setWhatsappImportText] = useState("");
+  const [whatsappImportDate, setWhatsappImportDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [importingWhatsapp, setImportingWhatsapp] = useState(false);
+  const [whatsappImportResult, setWhatsappImportResult] = useState(null);
+
   const getAdminHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem("adminToken")}`,
   });
@@ -632,6 +639,55 @@ function AdminDashboard() {
     }
   };
 
+
+  const importWhatsAppAttendance = async () => {
+    if (!whatsappImportText.trim()) {
+      window.showWarning?.("Please paste WhatsApp attendance messages.") ||
+        alert("Please paste WhatsApp attendance messages.");
+      return;
+    }
+
+    try {
+      setImportingWhatsapp(true);
+      setWhatsappImportResult(null);
+
+      const response = await axios.post(
+        "/api/attendance/import-whatsapp",
+        {
+          text: whatsappImportText,
+          date: whatsappImportDate,
+        },
+        {
+          headers: {
+            ...getAdminHeaders(),
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      setWhatsappImportResult(response.data.data || null);
+      window.showSuccess?.(response.data.message || "WhatsApp attendance imported.") ||
+        alert(response.data.message || "WhatsApp attendance imported.");
+
+      fetchAttendance(1, true);
+      fetchAttendanceSummary(true);
+      fetchAttendanceInsights(true);
+    } catch (error) {
+      console.error("WhatsApp Import Error:", error);
+
+      const message =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        "Failed to import WhatsApp attendance.";
+
+      window.showError?.(message) || alert(message);
+    } finally {
+      setImportingWhatsapp(false);
+    }
+  };
+
+  const sampleWhatsAppText = `[29/06, 08:59] Kamal: Entry\n[29/06, 13:00] Kamal: Break out\n[29/06, 13:30] Kamal: Break in\n[29/06, 18:01] Kamal: Out`;
+
   return (
     <section className="relative min-h-screen overflow-hidden bg-black px-4 py-6 text-white">
       <div className="absolute left-10 top-20 h-72 w-72 rounded-full bg-purple-600/20 blur-[120px]"></div>
@@ -681,6 +737,102 @@ function AdminDashboard() {
               Logout
             </button>
           </div>
+        </div>
+
+
+        {/* WHATSAPP ATTENDANCE IMPORT */}
+        <div className="mb-8 rounded-[30px] border border-green-500/20 bg-[#050505] p-6 shadow-2xl">
+          <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm text-green-400">Quick Backup Attendance</p>
+              <h2 className="text-2xl font-bold">WhatsApp Attendance Import</h2>
+              <p className="mt-2 max-w-2xl text-sm text-gray-500">
+                Paste WhatsApp group messages. The system will match employee name and update Entry, Break Out, Break In and Out.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <input
+                type="date"
+                value={whatsappImportDate}
+                onChange={(e) => setWhatsappImportDate(e.target.value)}
+                className="rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
+              />
+
+              <button
+                type="button"
+                onClick={() => setWhatsappImportText(sampleWhatsAppText)}
+                className="rounded-2xl border border-white/10 bg-[#111] px-4 py-3 font-semibold text-gray-300 hover:bg-white/10"
+              >
+                Paste Sample
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            value={whatsappImportText}
+            onChange={(e) => setWhatsappImportText(e.target.value)}
+            rows="7"
+            placeholder={`Example:\n[29/06, 08:59] Kamal: Entry\n[29/06, 13:00] Kamal: Break out\n[29/06, 13:30] Kamal: Break in\n[29/06, 18:01] Kamal: Out`}
+            className="w-full resize-y rounded-[24px] border border-white/10 bg-black p-4 text-sm text-white outline-none placeholder:text-gray-600 focus:border-green-500/40"
+          />
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={importWhatsAppAttendance}
+              disabled={importingWhatsapp}
+              className="rounded-2xl bg-green-500 px-5 py-3 font-bold text-black transition hover:bg-green-400 disabled:opacity-60"
+            >
+              {importingWhatsapp ? "Importing..." : "Import WhatsApp Logs"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setWhatsappImportText("");
+                setWhatsappImportResult(null);
+              }}
+              disabled={importingWhatsapp}
+              className="rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+            >
+              Clear
+            </button>
+          </div>
+
+          {whatsappImportResult && (
+            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded-[24px] border border-green-500/20 bg-green-500/10 p-4">
+                <p className="font-bold text-green-400">
+                  Imported: {whatsappImportResult.imported?.length || 0}
+                </p>
+                <div className="mt-3 max-h-48 space-y-2 overflow-auto text-sm text-gray-300">
+                  {(whatsappImportResult.imported || []).map((item, index) => (
+                    <div key={`${item.line}-${index}`} className="rounded-xl bg-black/30 p-3">
+                      <p className="font-semibold text-white">{item.employee}</p>
+                      <p className="text-gray-400">
+                        {item.date} • {item.time} • {item.scanType}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-red-500/20 bg-red-500/10 p-4">
+                <p className="font-bold text-red-400">
+                  Skipped: {whatsappImportResult.skipped?.length || 0}
+                </p>
+                <div className="mt-3 max-h-48 space-y-2 overflow-auto text-sm text-gray-300">
+                  {(whatsappImportResult.skipped || []).map((item, index) => (
+                    <div key={`${item.line}-${index}`} className="rounded-xl bg-black/30 p-3">
+                      <p className="text-white">{item.line}</p>
+                      <p className="text-red-300">{item.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ADMIN QUICK ACCESS */}
