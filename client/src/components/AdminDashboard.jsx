@@ -848,7 +848,7 @@ function AdminDashboard() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-8">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <button
               onClick={() => navigate("/admin-employees")}
               className="group rounded-[26px] border border-white/10 bg-[#111] p-6 text-left transition hover:bg-white hover:text-black"
@@ -912,6 +912,20 @@ function AdminDashboard() {
               <h3 className="mb-2 text-2xl font-bold">Monthly Shift Planner</h3>
               <p className="text-gray-500 group-hover:text-gray-700">
                 Assign working weekdays and future shift times for a complete month.
+              </p>
+            </button>
+
+
+            <button
+              onClick={() => navigate("/admin-past-shifts")}
+              className="group rounded-[26px] border border-white/10 bg-[#111] p-6 text-left transition hover:bg-white hover:text-black"
+            >
+              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500/10 text-sm font-extrabold text-orange-400 group-hover:bg-black group-hover:text-white">
+                PAST
+              </div>
+              <h3 className="mb-2 text-2xl font-bold">Add Your Past Shift</h3>
+              <p className="text-gray-500 group-hover:text-gray-700">
+                Add or update previous employee shifts only. Future dates are blocked.
               </p>
             </button>
 
