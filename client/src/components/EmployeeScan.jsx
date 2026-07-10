@@ -37,6 +37,33 @@ const ACTIONS = [
   },
 ];
 
+const getActionTitle = (type) =>
+  ACTIONS.find((item) => item.type === type)?.title || type;
+
+const formatWhatsAppStamp = (value) => {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const partValue = (type) =>
+    parts.find((part) => part.type === type)?.value || "";
+
+  return `[${partValue("day")}/${partValue("month")}, ${partValue(
+    "hour"
+  )}:${partValue("minute")}]`;
+};
+
+const createWhatsAppMessage = (employeeName, type, scannedAt) =>
+  `${formatWhatsAppStamp(scannedAt)} ${
+    employeeName || "Employee"
+  }: ${getActionTitle(type)}`;
+
 const EmployeeScan = () => {
   const navigate = useNavigate();
   const scannerRef = useRef(null);
@@ -192,16 +219,17 @@ const EmployeeScan = () => {
         throw new Error(result.message || "Attendance could not be saved.");
       }
 
-      const whatsappSent = Boolean(result.whatsapp?.sent);
-      const whatsappStatus = result.whatsapp?.status || "skipped";
+      const scannedAt = new Date().toISOString();
 
       setLastResult({
         type: selectedType,
         message: result.message,
-        scannedAt: new Date().toISOString(),
-        whatsappSent,
-        whatsappStatus,
-        whatsappError: result.whatsapp?.error || "",
+        scannedAt,
+        whatsappMessage: createWhatsAppMessage(
+          employee?.username,
+          selectedType,
+          scannedAt
+        ),
       });
       setMessage(result.message || "Attendance saved successfully.");
       setScanType("");
@@ -345,7 +373,25 @@ const EmployeeScan = () => {
     });
   };
 
-  const actionTitle = (type) => ACTIONS.find((item) => item.type === type)?.title || type;
+  const actionTitle = getActionTitle;
+
+  const sendToWhatsApp = () => {
+    if (!lastResult?.whatsappMessage) return;
+
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(
+      lastResult.whatsappMessage
+    )}`;
+
+    const whatsappWindow = window.open(
+      whatsappUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
+
+    if (!whatsappWindow) {
+      window.location.href = whatsappUrl;
+    }
+  };
 
   return (
     <section className="relative min-h-screen overflow-hidden bg-black px-4 pb-12 pt-28 text-white">
@@ -506,16 +552,27 @@ const EmployeeScan = () => {
                 <h3 className="mt-2 text-2xl font-bold">{actionTitle(lastResult.type)}</h3>
                 <p className="mt-2 text-sm text-gray-300">{lastResult.message}</p>
 
-                <div className="mt-4 rounded-2xl bg-black/20 p-4">
-                  <p className="text-xs text-gray-500">WhatsApp notification</p>
-                  <p className={`mt-1 font-bold ${lastResult.whatsappSent ? "text-green-300" : "text-yellow-300"}`}>
-                    {lastResult.whatsappSent
-                      ? "Sent successfully"
-                      : lastResult.whatsappStatus === "failed"
-                      ? "Attendance saved, WhatsApp sending failed"
-                      : "Attendance saved, WhatsApp integration not configured"}
+                <div className="mt-4 rounded-2xl border border-green-400/20 bg-black/30 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-gray-500">
+                    WhatsApp message
+                  </p>
+                  <p className="mt-2 break-words font-mono text-sm text-gray-200">
+                    {lastResult.whatsappMessage}
                   </p>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={sendToWhatsApp}
+                  className="mt-4 w-full rounded-2xl bg-green-500 px-5 py-4 font-extrabold text-black transition hover:bg-green-400 active:scale-[0.99]"
+                >
+                  Send to WhatsApp
+                </button>
+
+                <p className="mt-3 text-xs leading-5 text-gray-400">
+                  WhatsApp will open with the message ready. Select your attendance
+                  group and tap Send.
+                </p>
               </div>
             )}
 
