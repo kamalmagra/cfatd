@@ -759,16 +759,24 @@ app.get("/api/realtime/status", verifyAdmin, (req, res) => {
 });
 
 const createMailTransporter = () => {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    const emailUser = String(process.env.EMAIL_USER || "").trim();
+    const emailPass = String(process.env.EMAIL_PASS || "").replace(/\s+/g, "");
+
+    if (!emailUser || !emailPass) {
         return null;
     }
 
     return nodemailer.createTransport({
-        service: "gmail",
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
         auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
+            user: emailUser,
+            pass: emailPass,
         },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
     });
 };
 
@@ -782,14 +790,27 @@ const sendEmail = async({ to, subject, text }) => {
         };
     }
 
-    await transporter.sendMail({
-        from: `"Cargo Force Notifications" <${process.env.EMAIL_USER}>`,
-        to,
-        subject,
-        text,
-    });
+    try {
+        await transporter.sendMail({
+            from: `"Cargo Force Notifications" <${String(
+                process.env.EMAIL_USER || ""
+            ).trim()}>`,
+            to,
+            subject,
+            text,
+        });
 
-    return { sent: true };
+        return { sent: true };
+    } catch (error) {
+        console.error("Email send error:", error.code || error.message);
+
+        return {
+            sent: false,
+            reason: error.code || "Gmail SMTP error",
+        };
+    } finally {
+        transporter.close();
+    }
 };
 app.post("/register", async(req, res) => {
     try {
@@ -1179,7 +1200,7 @@ app.post("/api/announcements", verifyAdmin, async(req, res) => {
                 emailMessage =
                     " Announcement saved, but no employee emails were found.";
             } else {
-                const results = await Promise.allSettled(
+                const results = await Promise.all(
                     employees.map((employee) =>
                         sendEmail({
                             to: employee.email,
@@ -1189,11 +1210,14 @@ app.post("/api/announcements", verifyAdmin, async(req, res) => {
                     )
                 );
 
-                const sentCount = results.filter(
-                    (result) => result.status === "fulfilled"
-                ).length;
+                const sentCount = results.filter((result) => result.sent).length;
+                const failedCount = employees.length - sentCount;
 
                 emailMessage = ` Email sent to ${sentCount} of ${employees.length} employees.`;
+
+                if (failedCount > 0) {
+                    emailMessage += ` ${failedCount} email(s) failed.`;
+                }
             }
         }
 
@@ -1906,13 +1930,15 @@ app.post("/api/personal-notifications", verifyAdmin, async(req, res) => {
                 emailMessage =
                     " Notification saved, but email is not configured in .env.";
             } else {
-                await sendEmail({
+                const emailResult = await sendEmail({
                     to: employee.email,
                     subject: `Cargo Force: ${title}`,
                     text: `${title}\n\n${message}\n\nCargo Force Administration`,
                 });
 
-                emailMessage = " Email sent successfully.";
+                emailMessage = emailResult.sent ?
+                    " Email sent successfully." :
+                    ` Notification saved, but email failed (${emailResult.reason}).`;
             }
         }
 
@@ -2689,7 +2715,7 @@ const formatWhatsAppTimestamp = (date = new Date()) => {
         hour12: false,
     }).formatToParts(date);
 
-    const value = (type) => parts.find((part) => part.type === type) ?.value || "";
+    const value = (type) => parts.find((part) => part.type === type) ? .value || "";
 
     return `[${value("day")}/${value("month")}, ${value("hour")}:${value("minute")}]`;
 };
@@ -2813,7 +2839,7 @@ const sendWhatsAppAttendanceNotification = async({
             const result = await response.json().catch(() => ({}));
 
             if (!response.ok) {
-                throw new Error(result ?.error ?.message || `WhatsApp API returned ${response.status}`);
+                throw new Error(result ? .error ? .message || `WhatsApp API returned ${response.status}`);
             }
 
             return {
@@ -2821,7 +2847,7 @@ const sendWhatsAppAttendanceNotification = async({
                 status: "sent",
                 provider: "cloud-api",
                 message,
-                messageId: result ?.messages ?.[0] ?.id || "",
+                messageId: result ? .messages ? .[0] ? .id || "",
             };
         } catch (error) {
             console.error("WhatsApp Cloud API error:", error.message);
@@ -3444,7 +3470,7 @@ app.post("/api/attendance/import-whatsapp", verifyAdmin, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed ?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed ? .error || "Unable to read line" });
                 continue;
             }
 
@@ -3598,7 +3624,7 @@ app.post("/api/my/attendance/import-whatsapp", verifyToken, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed ?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed ? .error || "Unable to read line" });
                 continue;
             }
 
