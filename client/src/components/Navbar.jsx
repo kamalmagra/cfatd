@@ -46,12 +46,12 @@ const Navbar = () => {
   const menuItems = [
     { name: "Overview", path: "/", icon: "⌘" },
     { name: "Generate QR", path: "/contacts", icon: "▣" },
+    { name: "Scan Admin QR", path: "/employee-scan", icon: "◎" },
     {
       name: "Announcements",
       path: "/public-announcements",
       icon: "!",
     },
-    { name: "Admin Login", path: "/admin-login", icon: "◆" },
     { name: "Profile", path: "/profile", icon: "◉" },
   ];
 
@@ -98,6 +98,17 @@ const Navbar = () => {
             </Link>
 
             <Link
+              to="/employee-scan"
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition ${
+                isActive("/employee-scan")
+                  ? "bg-white text-black"
+                  : "text-gray-400 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              Scan Admin QR
+            </Link>
+
+            <Link
               to="/public-announcements"
               className={`px-5 py-2 rounded-xl text-sm font-medium transition ${
                 isActive("/public-announcements")
@@ -108,16 +119,6 @@ const Navbar = () => {
               Announcements
             </Link>
 
-            <Link
-              to="/admin-login"
-              className={`px-5 py-2 rounded-xl text-sm font-medium transition ${
-                isActive("/admin-login")
-                  ? "bg-white text-black"
-                  : "text-gray-400 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              Admin
-            </Link>
           </div>
 
           <div className="hidden md:block relative" ref={profileRef}>
@@ -139,6 +140,13 @@ const Navbar = () => {
 
                 {profileOpen && (
                   <div className="absolute right-0 top-14 w-56 bg-[#111] border border-white/10 rounded-2xl shadow-xl p-2">
+                    <Link
+                      to="/employee-scan"
+                      className="block px-4 py-3 rounded-xl text-gray-300 hover:bg-white/10 hover:text-white"
+                    >
+                      Scan Admin QR
+                    </Link>
+
                     <Link
                       to="/profile"
                       className="block px-4 py-3 rounded-xl text-gray-300 hover:bg-white/10 hover:text-white"
@@ -209,22 +217,6 @@ const Navbar = () => {
                 className="w-10 h-10 rounded-full bg-white/10 text-2xl flex items-center justify-center"
               >
                 ×
-              </button>
-            </div>
-
-            <div className="bg-[#111] border border-white/10 rounded-2xl p-1 flex mb-7">
-              <button className="w-1/2 bg-white text-black rounded-xl py-2 text-sm font-semibold">
-                Personal
-              </button>
-
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  navigate("/admin-login");
-                }}
-                className="w-1/2 text-gray-500 rounded-xl py-2 text-sm"
-              >
-                Admin
               </button>
             </div>
 

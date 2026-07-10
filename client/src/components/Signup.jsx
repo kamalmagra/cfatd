@@ -7,38 +7,68 @@ const Signup = () => {
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
+
+  const API_BASE =
+    window.location.hostname === "localhost"
+      ? "http://localhost:5000"
+      : "https://cfatd-backend.onrender.com";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage("");
 
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanMobile = mobile.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanUsername || !cleanEmail || !cleanPassword) {
+      setMessage("Username, email and password are required.");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setMessage("Please enter a valid email address.");
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setMessage("Password must be at least 6 characters.");
+      return;
+    }
+
     try {
-      const response = await fetch("https://cfatd-backend.onrender.com/register", {
+      setLoading(true);
+
+      const response = await fetch(`${API_BASE}/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username,
-          email,
-          mobile,
-          password,
+          username: cleanUsername,
+          email: cleanEmail,
+          mobile: cleanMobile,
+          password: cleanPassword,
         }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
+      if (response.ok && data.success) {
         alert("Signup successful! Please login.");
         navigate("/login");
       } else {
-        setMessage(data.error || "Signup failed.");
+        setMessage(data.error || data.message || "Signup failed.");
       }
     } catch (err) {
       console.error(err);
       setMessage("Server error. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -136,9 +166,10 @@ const Signup = () => {
 
             <button
               type="submit"
-              className="w-full bg-white text-black py-4 rounded-2xl font-bold hover:bg-gray-200 transition"
+              disabled={loading}
+              className="w-full bg-white text-black py-4 rounded-2xl font-bold hover:bg-gray-200 transition disabled:opacity-60"
             >
-              Create Account
+              {loading ? "Creating Account..." : "Create Account"}
             </button>
           </form>
 

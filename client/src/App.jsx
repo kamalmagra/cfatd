@@ -25,6 +25,9 @@ import AdminAnalytics from "./components/AdminAnalytics";
 import AdminActivityLogs from "./components/AdminActivityLogs";
 import AdminRealtime from "./components/AdminRealtime";
 import PublicAnnouncements from "./components/PublicAnnouncements";
+import AdminPastShiftManager from "./components/AdminPastShiftManager";
+import EmployeeScan from "./components/EmployeeScan";
+import AdminAttendanceQr from "./components/AdminAttendanceQr";
 
 const ProtectedAdminRoute = ({ children }) => {
   const adminToken = localStorage.getItem("adminToken");
@@ -110,6 +113,15 @@ function App() {
         />
 
         <Route
+          path="/employee-scan"
+          element={
+            <PublicLayout>
+              <EmployeeScan />
+            </PublicLayout>
+          }
+        />
+
+        <Route
           path="/public-announcements"
           element={
             <PublicLayout>
@@ -154,6 +166,16 @@ function App() {
         />
 
         <Route
+          path="/admin-announcement"
+          element={<Navigate to="/admin-announcements" replace />}
+        />
+
+        <Route
+          path="/admin/announcements"
+          element={<Navigate to="/admin-announcements" replace />}
+        />
+
+        <Route
           path="/admin-personal-notifications"
           element={
             <ProtectedAdminRoute>
@@ -170,6 +192,17 @@ function App() {
             <ProtectedAdminRoute>
               <AdminLayout>
                 <AdminShiftPlanner />
+              </AdminLayout>
+            </ProtectedAdminRoute>
+          }
+        />
+
+        <Route
+          path="/admin-past-shifts"
+          element={
+            <ProtectedAdminRoute>
+              <AdminLayout>
+                <AdminPastShiftManager />
               </AdminLayout>
             </ProtectedAdminRoute>
           }
@@ -214,6 +247,17 @@ function App() {
             <ProtectedAdminRoute>
               <AdminLayout>
                 <AdminEmployees />
+              </AdminLayout>
+            </ProtectedAdminRoute>
+          }
+        />
+
+        <Route
+          path="/admin-attendance-qr"
+          element={
+            <ProtectedAdminRoute>
+              <AdminLayout>
+                <AdminAttendanceQr />
               </AdminLayout>
             </ProtectedAdminRoute>
           }

@@ -18,8 +18,8 @@ const Home = () => {
     },
     {
       number: "03",
-      title: "Admin Scan",
-      text: "Admin scans QR for Entry, Break Out, Break In and Last Out.",
+      title: "Choose Scan Method",
+      text: "Admin scans employee QR, or employee chooses an action and scans the admin QR.",
     },
   ];
 
@@ -93,6 +93,13 @@ const Home = () => {
               </Link>
 
               <Link
+                to="/employee-scan"
+                className="rounded-2xl border border-purple-500/20 bg-purple-500/10 px-7 py-4 font-bold text-purple-300 transition hover:bg-purple-500/20"
+              >
+                Scan Admin QR
+              </Link>
+
+              <Link
                 to="/public-announcements"
                 className="rounded-2xl border border-green-500/20 bg-green-500/10 px-7 py-4 font-bold text-green-400 transition hover:bg-green-500/20"
               >
@@ -105,7 +112,7 @@ const Home = () => {
             <div className="mb-5 rounded-[28px] border border-white/10 bg-[#111] p-6">
               <p className="text-sm text-gray-500">System Flow</p>
               <h2 className="mt-2 text-3xl font-bold">
-                Login → QR → Scan → Dashboard
+                Login → Choose Action → Scan → Saved
               </h2>
             </div>
 
@@ -211,7 +218,7 @@ const Home = () => {
 
           <div className="rounded-[28px] border border-white/10 bg-[#111] p-6">
             <p className="text-gray-500">Dashboard</p>
-            <h3 className="mt-2 text-2xl font-bold">Admin Panel</h3>
+            <h3 className="mt-2 text-2xl font-bold">My Records</h3>
           </div>
 
           <div className="rounded-[28px] border border-white/10 bg-[#111] p-6">

@@ -5,8 +5,8 @@ import axios from "axios";
 const initialForm = {
   title: "",
   message: "",
-  type: "employee",
-  sendEmail: true,
+  type: "public",
+  sendEmail: false,
   showPopup: true,
 };
 

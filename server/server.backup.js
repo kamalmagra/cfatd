@@ -2689,7 +2689,7 @@ const formatWhatsAppTimestamp = (date = new Date()) => {
         hour12: false,
     }).formatToParts(date);
 
-    const value = (type) => parts.find((part) => part.type === type) ?.value || "";
+    const value = (type) => parts.find((part) => part.type === type) ? .value || "";
 
     return `[${value("day")}/${value("month")}, ${value("hour")}:${value("minute")}]`;
 };
@@ -2813,7 +2813,7 @@ const sendWhatsAppAttendanceNotification = async({
             const result = await response.json().catch(() => ({}));
 
             if (!response.ok) {
-                throw new Error(result ?.error ?.message || `WhatsApp API returned ${response.status}`);
+                throw new Error(result ? .error ? .message || `WhatsApp API returned ${response.status}`);
             }
 
             return {
@@ -2821,7 +2821,7 @@ const sendWhatsAppAttendanceNotification = async({
                 status: "sent",
                 provider: "cloud-api",
                 message,
-                messageId: result ?.messages ?.[0] ?.id || "",
+                messageId: result ? .messages ? .[0] ? .id || "",
             };
         } catch (error) {
             console.error("WhatsApp Cloud API error:", error.message);
@@ -3444,7 +3444,7 @@ app.post("/api/attendance/import-whatsapp", verifyAdmin, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed ?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed ? .error || "Unable to read line" });
                 continue;
             }
 
@@ -3598,7 +3598,7 @@ app.post("/api/my/attendance/import-whatsapp", verifyToken, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed ?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed ? .error || "Unable to read line" });
                 continue;
             }
 

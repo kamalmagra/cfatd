@@ -723,6 +723,13 @@ function AdminDashboard() {
             </button>
 
             <button
+              onClick={() => navigate("/admin-attendance-qr")}
+              className="rounded-2xl bg-purple-500/10 px-5 py-3 font-bold text-purple-300 transition hover:bg-purple-500/20"
+            >
+              Admin QR
+            </button>
+
+            <button
               onClick={() => fetchAttendance(pagination.page, true)}
               disabled={refreshing}
               className="rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
@@ -850,6 +857,19 @@ function AdminDashboard() {
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <button
+              onClick={() => navigate("/admin-attendance-qr")}
+              className="group rounded-[26px] border border-purple-500/20 bg-purple-500/10 p-6 text-left transition hover:bg-white hover:text-black"
+            >
+              <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-500/20 text-sm font-extrabold text-purple-300 group-hover:bg-black group-hover:text-white">
+                QR
+              </div>
+              <h3 className="mb-2 text-2xl font-bold">Employee Self Scan QR</h3>
+              <p className="text-gray-400 group-hover:text-gray-700">
+                Generate the admin QR employees scan for In, Break and Sign Out.
+              </p>
+            </button>
+
+            <button
               onClick={() => navigate("/admin-employees")}
               className="group rounded-[26px] border border-white/10 bg-[#111] p-6 text-left transition hover:bg-white hover:text-black"
             >
@@ -956,7 +976,7 @@ function AdminDashboard() {
             </button>
 
             <button
-              onClick={() => navigate("/public-announcements")}
+              onClick={() => navigate("/admin-announcements")}
               className="group rounded-[26px] border border-white/10 bg-[#111] p-6 text-left transition hover:bg-white hover:text-black"
             >
               <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-green-500/10 text-2xl text-green-400 group-hover:bg-black group-hover:text-white">
@@ -964,7 +984,7 @@ function AdminDashboard() {
               </div>
               <h3 className="mb-2 text-2xl font-bold">Public Announcements</h3>
               <p className="text-gray-500 group-hover:text-gray-700">
-                View the public updates page.
+                Create public updates and preview what everyone can see.
               </p>
             </button>
           </div>

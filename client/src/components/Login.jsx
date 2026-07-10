@@ -8,12 +8,17 @@ const Login = () => {
 
   const navigate = useNavigate();
 
+  const API_BASE =
+    window.location.hostname === "localhost"
+      ? "http://localhost:5000"
+      : "https://cfatd-backend.onrender.com";
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage("");
 
     try {
-      const response = await fetch("https://cfatd-backend.onrender.com/login", {
+      const response = await fetch(`${API_BASE}/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

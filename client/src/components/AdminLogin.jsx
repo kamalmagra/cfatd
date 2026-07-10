@@ -8,12 +8,17 @@ const AdminLogin = () => {
 
   const navigate = useNavigate();
 
+  const API_BASE =
+    window.location.hostname === "localhost"
+      ? "http://localhost:5000"
+      : "https://cfatd-backend.onrender.com";
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setMessage("");
 
     try {
-      const response = await fetch("https://cfatd-backend.onrender.com/admin-login", {
+      const response = await fetch(`${API_BASE}/admin-login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
