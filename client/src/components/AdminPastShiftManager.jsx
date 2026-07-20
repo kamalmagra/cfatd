@@ -36,6 +36,83 @@ const getStartOfMonth = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 };
 
+
+const TIME_FIELDS = ["startTime", "breakStartTime", "breakEndTime", "endTime"];
+
+const normalizeTime24 = (value) => {
+  const textValue = String(value ?? "").trim().toUpperCase();
+
+  if (!textValue) return "";
+
+  let match = textValue.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+
+  if (match) {
+    return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+  }
+
+  match = textValue.match(/^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/);
+
+  if (match) {
+    let hour = Number(match[1]);
+    const minute = match[2];
+    const period = match[3];
+
+    if (period === "AM" && hour === 12) hour = 0;
+    if (period === "PM" && hour !== 12) hour += 12;
+
+    return `${String(hour).padStart(2, "0")}:${minute}`;
+  }
+
+  match = textValue.match(/^(\d{3,4})$/);
+
+  if (match) {
+    const digits = match[1].padStart(4, "0");
+    const hour = Number(digits.slice(0, 2));
+    const minute = Number(digits.slice(2));
+
+    if (hour <= 23 && minute <= 59) {
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+  }
+
+  return null;
+};
+
+const displayTime24 = (value) => {
+  const normalized = normalizeTime24(value);
+  return normalized === null || normalized === "" ? "-" : normalized;
+};
+
+const Time24Input = ({ label, name, value, onChange }) => {
+  const updateValue = (nextValue) => {
+    onChange({ target: { name, value: nextValue } });
+  };
+
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-gray-400">{label}</label>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        name={name}
+        value={value}
+        placeholder="HH:MM"
+        maxLength={8}
+        onChange={(event) =>
+          updateValue(event.target.value.replace(/[^0-9:apmAPM ]/g, ""))
+        }
+        onBlur={() => {
+          const normalized = normalizeTime24(value);
+          if (normalized !== null) updateValue(normalized);
+        }}
+        className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 font-mono text-white outline-none focus:border-orange-500/60"
+        aria-label={`${label} in 24-hour HH:MM format`}
+      />
+    </div>
+  );
+};
+
 function AdminPastShiftManager() {
   const navigate = useNavigate();
   const now = new Date();
@@ -156,6 +233,34 @@ function AdminPastShiftManager() {
       return;
     }
 
+    const normalizedForm = { ...form };
+
+    if (status === "working") {
+      for (const field of TIME_FIELDS) {
+        const normalized = normalizeTime24(form[field]);
+
+        if (normalized === null) {
+          showError("Use 24-hour time in HH:MM format, for example 09:00 or 18:30.");
+          return;
+        }
+
+        normalizedForm[field] = normalized;
+      }
+
+      if (!normalizedForm.startTime || !normalizedForm.endTime) {
+        showError("Start and end time are required for a working shift.");
+        return;
+      }
+
+      const hasBreakStart = Boolean(normalizedForm.breakStartTime);
+      const hasBreakEnd = Boolean(normalizedForm.breakEndTime);
+
+      if (hasBreakStart !== hasBreakEnd) {
+        showError("Enter both break start and break end, or leave both empty.");
+        return;
+      }
+    }
+
     try {
       setSaving(true);
       const payload = {
@@ -166,10 +271,10 @@ function AdminPastShiftManager() {
         date: singleDate,
         workingDays,
         status,
-        startTime: form.startTime,
-        breakStartTime: form.breakStartTime,
-        breakEndTime: form.breakEndTime,
-        endTime: form.endTime,
+        startTime: status === "working" ? normalizedForm.startTime : "",
+        breakStartTime: status === "working" ? normalizedForm.breakStartTime : "",
+        breakEndTime: status === "working" ? normalizedForm.breakEndTime : "",
+        endTime: status === "working" ? normalizedForm.endTime : "",
         notes: form.notes,
       };
 
@@ -181,6 +286,7 @@ function AdminPastShiftManager() {
       });
 
       showSuccess(response.data.message || "Past shift updated successfully.");
+      if (status === "working") setForm((current) => ({ ...current, ...normalizedForm }));
       await fetchPastShiftReport(true);
     } catch (error) {
       console.error("Past shift save error:", error);
@@ -242,10 +348,10 @@ function AdminPastShiftManager() {
       formatShiftDate(item.date),
       getDayName(item.date),
       item.status || "-",
-      item.startTime || "",
-      item.breakStartTime || "",
-      item.breakEndTime || "",
-      item.endTime || "",
+      displayTime24(item.startTime24 || item.startTime),
+      displayTime24(item.breakStartTime24 || item.breakStartTime),
+      displayTime24(item.breakEndTime24 || item.breakEndTime),
+      displayTime24(item.endTime24 || item.endTime),
       item.notes || "",
     ]);
 
@@ -321,10 +427,10 @@ function AdminPastShiftManager() {
         item.date || "-",
         getDayName(item.date),
         item.status || "-",
-        item.startTime || "-",
-        item.breakStartTime || "-",
-        item.breakEndTime || "-",
-        item.endTime || "-",
+        displayTime24(item.startTime24 || item.startTime),
+        displayTime24(item.breakStartTime24 || item.breakStartTime),
+        displayTime24(item.breakEndTime24 || item.breakEndTime),
+        displayTime24(item.endTime24 || item.endTime),
         item.notes || "-",
       ]),
       styles: { fontSize: 9, cellPadding: 2 },
@@ -495,23 +601,20 @@ function AdminPastShiftManager() {
             </div>
 
             {status === "working" && (
-              <div className="mb-5 grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-gray-400">Start</label>
-                  <input type="time" name="startTime" value={form.startTime} onChange={handleFormChange} className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 outline-none" />
+              <div className="mb-5">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-gray-400">Shift Times</p>
+                  <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-xs font-bold text-orange-300">
+                    24-hour HH:MM
+                  </span>
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-gray-400">End</label>
-                  <input type="time" name="endTime" value={form.endTime} onChange={handleFormChange} className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 outline-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Time24Input label="Start" name="startTime" value={form.startTime} onChange={handleFormChange} />
+                  <Time24Input label="End" name="endTime" value={form.endTime} onChange={handleFormChange} />
+                  <Time24Input label="Break Start" name="breakStartTime" value={form.breakStartTime} onChange={handleFormChange} />
+                  <Time24Input label="Break End" name="breakEndTime" value={form.breakEndTime} onChange={handleFormChange} />
                 </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-gray-400">Break Start</label>
-                  <input type="time" name="breakStartTime" value={form.breakStartTime} onChange={handleFormChange} className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 outline-none" />
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-gray-400">Break End</label>
-                  <input type="time" name="breakEndTime" value={form.breakEndTime} onChange={handleFormChange} className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 outline-none" />
-                </div>
+                <p className="mt-2 text-xs text-gray-500">Examples: 09:00, 13:30, 18:45. AM/PM is not required.</p>
               </div>
             )}
 
@@ -619,9 +722,9 @@ function AdminPastShiftManager() {
                             {item.status || "-"}
                           </span>
                         </td>
-                        <td className="p-4">{item.startTime || "-"}</td>
-                        <td className="p-4">{item.breakStartTime || "-"} - {item.breakEndTime || "-"}</td>
-                        <td className="p-4">{item.endTime || "-"}</td>
+                        <td className="p-4">{displayTime24(item.startTime24 || item.startTime)}</td>
+                        <td className="p-4">{displayTime24(item.breakStartTime24 || item.breakStartTime)} - {displayTime24(item.breakEndTime24 || item.breakEndTime)}</td>
+                        <td className="p-4">{displayTime24(item.endTime24 || item.endTime)}</td>
                         <td className="p-4 text-gray-400">{item.notes || "-"}</td>
                       </tr>
                     ))

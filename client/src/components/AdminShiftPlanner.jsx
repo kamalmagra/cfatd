@@ -76,6 +76,91 @@ const getNextMonthRange = () => {
   };
 };
 
+
+const TIME_FIELDS = ["startTime", "breakStartTime", "breakEndTime", "endTime"];
+
+const normalizeTime24 = (value) => {
+  const textValue = String(value ?? "").trim().toUpperCase();
+
+  if (!textValue) return "";
+
+  let match = textValue.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (match) return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+
+  match = textValue.match(/^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/);
+  if (match) {
+    let hour = Number(match[1]);
+    if (match[3] === "AM" && hour === 12) hour = 0;
+    if (match[3] === "PM" && hour !== 12) hour += 12;
+    return `${String(hour).padStart(2, "0")}:${match[2]}`;
+  }
+
+  match = textValue.match(/^(\d{3,4})$/);
+  if (match) {
+    const digits = match[1].padStart(4, "0");
+    const hour = Number(digits.slice(0, 2));
+    const minute = Number(digits.slice(2));
+    if (hour <= 23 && minute <= 59) {
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+  }
+
+  return null;
+};
+
+const displayTime24 = (value) => {
+  const normalized = normalizeTime24(value);
+  return normalized === null || normalized === "" ? "-" : normalized;
+};
+
+const normalizeWorkingShift = (source) => {
+  const normalized = { ...source };
+
+  for (const field of TIME_FIELDS) {
+    const value = normalizeTime24(source[field]);
+    if (value === null) {
+      return { error: "Use 24-hour time in HH:MM format, for example 09:00 or 18:30." };
+    }
+    normalized[field] = value;
+  }
+
+  if (!normalized.startTime || !normalized.endTime) {
+    return { error: "Start and end time are required for a working shift." };
+  }
+
+  if (Boolean(normalized.breakStartTime) !== Boolean(normalized.breakEndTime)) {
+    return { error: "Enter both break out and break in, or leave both empty." };
+  }
+
+  return { value: normalized };
+};
+
+const Time24Input = ({ label, name, value, onChange }) => {
+  const updateValue = (nextValue) => onChange({ target: { name, value: nextValue } });
+
+  return (
+    <div>
+      {label && <label className="mb-2 block text-xs font-semibold text-gray-500">{label}</label>}
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        name={name}
+        value={value}
+        placeholder="HH:MM"
+        maxLength={8}
+        onChange={(event) => updateValue(event.target.value.replace(/[^0-9:apmAPM ]/g, ""))}
+        onBlur={() => {
+          const normalized = normalizeTime24(value);
+          if (normalized !== null) updateValue(normalized);
+        }}
+        className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 font-mono text-white outline-none focus:border-orange-500/60"
+        aria-label={`${label} in 24-hour HH:MM format`}
+      />
+    </div>
+  );
+};
+
 const AdminShiftPlanner = () => {
   const now = new Date();
   const navigate = useNavigate();
@@ -288,6 +373,12 @@ const AdminShiftPlanner = () => {
       return;
     }
 
+    const normalizedMonthly = normalizeWorkingShift(shift);
+    if (normalizedMonthly.error) {
+      showError(normalizedMonthly.error);
+      return;
+    }
+
     try {
       setSavingMonth(true);
 
@@ -297,7 +388,7 @@ const AdminShiftPlanner = () => {
           employeeId,
           year,
           month,
-          ...shift,
+          ...normalizedMonthly.value,
         },
         {
           headers: {
@@ -308,6 +399,7 @@ const AdminShiftPlanner = () => {
       );
 
       setSchedules(response.data.data || []);
+      setShift(normalizedMonthly.value);
       showSuccess(response.data.message || "Monthly shift updated successfully.");
     } catch (error) {
       console.error("Monthly shift update error:", error);
@@ -346,6 +438,24 @@ const AdminShiftPlanner = () => {
       return;
     }
 
+    const normalizedRange =
+      rangeShift.status === "working"
+        ? normalizeWorkingShift(rangeShift)
+        : {
+            value: {
+              ...rangeShift,
+              startTime: "",
+              breakStartTime: "",
+              breakEndTime: "",
+              endTime: "",
+            },
+          };
+
+    if (normalizedRange.error) {
+      showError(normalizedRange.error);
+      return;
+    }
+
     try {
       setSavingRange(true);
 
@@ -357,11 +467,11 @@ const AdminShiftPlanner = () => {
           endDate: rangeShift.endDate,
           workingDays: rangeShift.workingDays,
           status: rangeShift.status,
-          startTime: rangeShift.startTime,
-          breakStartTime: rangeShift.breakStartTime,
-          breakEndTime: rangeShift.breakEndTime,
-          endTime: rangeShift.endTime,
-          notes: rangeShift.notes,
+          startTime: normalizedRange.value.startTime,
+          breakStartTime: normalizedRange.value.breakStartTime,
+          breakEndTime: normalizedRange.value.breakEndTime,
+          endTime: normalizedRange.value.endTime,
+          notes: normalizedRange.value.notes,
         },
         {
           headers: {
@@ -371,6 +481,7 @@ const AdminShiftPlanner = () => {
         }
       );
 
+      setRangeShift(normalizedRange.value);
       showSuccess(response.data.message || "Shift range updated successfully.");
       fetchSchedules();
     } catch (error) {
@@ -389,16 +500,22 @@ const AdminShiftPlanner = () => {
     setEditSchedule(schedule);
     setEditForm({
       status: schedule.status || "working",
-      startTime: schedule.startTime || "",
-      breakStartTime: schedule.breakStartTime || "",
-      breakEndTime: schedule.breakEndTime || "",
-      endTime: schedule.endTime || "",
+      startTime: normalizeTime24(schedule.startTime) || "",
+      breakStartTime: normalizeTime24(schedule.breakStartTime) || "",
+      breakEndTime: normalizeTime24(schedule.breakEndTime) || "",
+      endTime: normalizeTime24(schedule.endTime) || "",
       notes: schedule.notes || "",
     });
   };
 
   const createSingleDateShift = async (date) => {
     if (!employeeId || !date) return;
+
+    const normalizedSingle = normalizeWorkingShift(shift);
+    if (normalizedSingle.error) {
+      showError(normalizedSingle.error);
+      return;
+    }
 
     try {
       const response = await axios.post(
@@ -409,11 +526,11 @@ const AdminShiftPlanner = () => {
           endDate: date,
           workingDays: [new Date(`${date}T00:00:00.000Z`).getUTCDay()],
           status: "working",
-          startTime: shift.startTime,
-          breakStartTime: shift.breakStartTime,
-          breakEndTime: shift.breakEndTime,
-          endTime: shift.endTime,
-          notes: shift.notes || "Single day shift",
+          startTime: normalizedSingle.value.startTime,
+          breakStartTime: normalizedSingle.value.breakStartTime,
+          breakEndTime: normalizedSingle.value.breakEndTime,
+          endTime: normalizedSingle.value.endTime,
+          notes: normalizedSingle.value.notes || "Single day shift",
         },
         {
           headers: {
@@ -436,10 +553,28 @@ const AdminShiftPlanner = () => {
   const saveDateShift = async () => {
     if (!editSchedule) return;
 
+    const normalizedEdit =
+      editForm.status === "working"
+        ? normalizeWorkingShift(editForm)
+        : {
+            value: {
+              ...editForm,
+              startTime: "",
+              breakStartTime: "",
+              breakEndTime: "",
+              endTime: "",
+            },
+          };
+
+    if (normalizedEdit.error) {
+      showError(normalizedEdit.error);
+      return;
+    }
+
     try {
       setSavingDate(true);
 
-      const response = await axios.put(`/api/shift-schedules/${editSchedule._id}`, editForm, {
+      const response = await axios.put(`/api/shift-schedules/${editSchedule._id}`, normalizedEdit.value, {
         headers: {
           ...headers(),
           "Content-Type": "application/json",
@@ -503,49 +638,18 @@ const AdminShiftPlanner = () => {
   };
 
   const renderShiftTimeFields = (source, handler) => (
-    <div className="grid grid-cols-2 gap-3">
-      <div>
-        <label className="mb-2 block text-xs font-semibold text-gray-500">Start</label>
-        <input
-          type="time"
-          name="startTime"
-          value={source.startTime}
-          onChange={handler}
-          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
-        />
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold text-gray-500">Shift Times</p>
+        <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-bold text-orange-300">
+          24-hour HH:MM
+        </span>
       </div>
-
-      <div>
-        <label className="mb-2 block text-xs font-semibold text-gray-500">Break Out</label>
-        <input
-          type="time"
-          name="breakStartTime"
-          value={source.breakStartTime}
-          onChange={handler}
-          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
-        />
-      </div>
-
-      <div>
-        <label className="mb-2 block text-xs font-semibold text-gray-500">Break In</label>
-        <input
-          type="time"
-          name="breakEndTime"
-          value={source.breakEndTime}
-          onChange={handler}
-          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
-        />
-      </div>
-
-      <div>
-        <label className="mb-2 block text-xs font-semibold text-gray-500">End</label>
-        <input
-          type="time"
-          name="endTime"
-          value={source.endTime}
-          onChange={handler}
-          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
-        />
+      <div className="grid grid-cols-2 gap-3">
+        <Time24Input label="Start" name="startTime" value={source.startTime} onChange={handler} />
+        <Time24Input label="Break Out" name="breakStartTime" value={source.breakStartTime} onChange={handler} />
+        <Time24Input label="Break In" name="breakEndTime" value={source.breakEndTime} onChange={handler} />
+        <Time24Input label="End" name="endTime" value={source.endTime} onChange={handler} />
       </div>
     </div>
   );
@@ -895,10 +999,10 @@ const AdminShiftPlanner = () => {
                             {schedule.status === "working" ? (
                               <>
                                 <p className="font-semibold">
-                                  {schedule.startTime || "-"} - {schedule.endTime || "-"}
+                                  {displayTime24(schedule.startTime)} - {displayTime24(schedule.endTime)}
                                 </p>
                                 <p className="text-gray-400">
-                                  Break: {schedule.breakStartTime || "-"} - {schedule.breakEndTime || "-"}
+                                  Break: {displayTime24(schedule.breakStartTime)} - {displayTime24(schedule.breakEndTime)}
                                 </p>
                               </>
                             ) : (
@@ -974,13 +1078,13 @@ const AdminShiftPlanner = () => {
                             ? "Break In"
                             : "End"}
                         </label>
-                        <input
-                          type="time"
+                        <Time24Input
+                          label=""
+                          name={field}
                           value={editForm[field]}
                           onChange={(event) =>
                             setEditForm((current) => ({ ...current, [field]: event.target.value }))
                           }
-                          className="w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white outline-none"
                         />
                       </div>
                     ))}

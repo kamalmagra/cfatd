@@ -1,3 +1,4 @@
+import "./utils/force24Hour.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import Swal from "sweetalert2";
