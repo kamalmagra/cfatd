@@ -4,6 +4,64 @@ import axios from "axios";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
+function DateTimeInput24({ value, onChange }) {
+  const [datePart = "", timePartRaw = ""] = String(value || "").split("T");
+  const timePart = timePartRaw.slice(0, 5);
+  const [hour = "", minute = ""] = timePart.split(":");
+
+  const emit = (nextDate, nextHour, nextMinute) => {
+    if (!nextDate) {
+      onChange("");
+      return;
+    }
+
+    const safeHour = String(nextHour || "00").padStart(2, "0");
+    const safeMinute = String(nextMinute || "00").padStart(2, "0");
+    onChange(`${nextDate}T${safeHour}:${safeMinute}`);
+  };
+
+  return (
+    <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-2">
+      <input
+        type="date"
+        value={datePart}
+        onChange={(event) => emit(event.target.value, hour, minute)}
+        className="min-w-0 rounded-2xl border border-white/10 bg-[#111] px-3 py-3 text-white"
+      />
+      <select
+        aria-label="Hour (24-hour format)"
+        value={hour || "00"}
+        onChange={(event) => emit(datePart, event.target.value, minute)}
+        className="rounded-2xl border border-white/10 bg-[#111] px-3 py-3 text-white"
+      >
+        {Array.from({ length: 24 }, (_, index) => {
+          const option = String(index).padStart(2, "0");
+          return (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          );
+        })}
+      </select>
+      <select
+        aria-label="Minute"
+        value={minute || "00"}
+        onChange={(event) => emit(datePart, hour, event.target.value)}
+        className="rounded-2xl border border-white/10 bg-[#111] px-3 py-3 text-white"
+      >
+        {Array.from({ length: 60 }, (_, index) => {
+          const option = String(index).padStart(2, "0");
+          return (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          );
+        })}
+      </select>
+    </div>
+  );
+}
+
 function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -284,8 +342,6 @@ function AdminDashboard() {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-      hour12: false,
-      hourCycle: "h23",
     });
   };
 
@@ -1883,50 +1939,46 @@ function AdminDashboard() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="text-sm text-gray-500">Entry Time</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput24
                     value={formData.entryTime}
-                    onChange={(e) =>
-                      setFormData({ ...formData, entryTime: e.target.value })
+                    onChange={(nextValue) =>
+                      setFormData({ ...formData, entryTime: nextValue })
                     }
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
                   />
+                  <p className="mt-1 text-xs text-gray-600">24-hour format (00:00–23:59)</p>
                 </div>
 
                 <div>
                   <label className="text-sm text-gray-500">Break Out</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput24
                     value={formData.breakOutTime}
-                    onChange={(e) =>
-                      setFormData({ ...formData, breakOutTime: e.target.value })
+                    onChange={(nextValue) =>
+                      setFormData({ ...formData, breakOutTime: nextValue })
                     }
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
                   />
+                  <p className="mt-1 text-xs text-gray-600">24-hour format (00:00–23:59)</p>
                 </div>
 
                 <div>
                   <label className="text-sm text-gray-500">Break In</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput24
                     value={formData.breakInTime}
-                    onChange={(e) =>
-                      setFormData({ ...formData, breakInTime: e.target.value })
+                    onChange={(nextValue) =>
+                      setFormData({ ...formData, breakInTime: nextValue })
                     }
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
                   />
+                  <p className="mt-1 text-xs text-gray-600">24-hour format (00:00–23:59)</p>
                 </div>
 
                 <div>
                   <label className="text-sm text-gray-500">Out Time</label>
-                  <input
-                    type="datetime-local"
+                  <DateTimeInput24
                     value={formData.lastOutTime}
-                    onChange={(e) =>
-                      setFormData({ ...formData, lastOutTime: e.target.value })
+                    onChange={(nextValue) =>
+                      setFormData({ ...formData, lastOutTime: nextValue })
                     }
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111] px-4 py-3 text-white"
                   />
+                  <p className="mt-1 text-xs text-gray-600">24-hour format (00:00–23:59)</p>
                 </div>
               </div>
 
