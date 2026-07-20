@@ -308,6 +308,120 @@ const findUserByIdentifier = async(value) => {
     return User.findOne(filter).select("_id username email mobile currentQrVersion");
 };
 
+const DISPLAY_TIME_ZONE =
+    process.env.ATTENDANCE_TIME_ZONE ||
+    process.env.WHATSAPP_TIME_ZONE ||
+    "Europe/London";
+
+const getDateTimeParts24 = (value, timeZone = DISPLAY_TIME_ZONE) => {
+    if (!value) return null;
+
+    const date = value instanceof Date ? value : new Date(value);
+
+    if (Number.isNaN(date.getTime())) return null;
+
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+    }).formatToParts(date);
+
+    const valueFor = (type) => {
+        const part = parts.find((item) => item.type === type);
+        return part ? part.value : "";
+    };
+
+    return {
+        year: valueFor("year"),
+        month: valueFor("month"),
+        day: valueFor("day"),
+        hour: valueFor("hour"),
+        minute: valueFor("minute"),
+        second: valueFor("second"),
+    };
+};
+
+const formatTime24 = (value, timeZone = DISPLAY_TIME_ZONE) => {
+    const parts = getDateTimeParts24(value, timeZone);
+    return parts ? `${parts.hour}:${parts.minute}` : "";
+};
+
+const formatDateTime24 = (value, timeZone = DISPLAY_TIME_ZONE) => {
+    const parts = getDateTimeParts24(value, timeZone);
+
+    if (!parts) return "";
+
+    return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
+};
+
+const add24HourAttendanceFields = (record = {}) => {
+    const plain =
+        record && typeof record.toObject === "function" ?
+        record.toObject() :
+        {...record };
+
+    const workSessions = Array.isArray(plain.workSessions) ?
+        plain.workSessions.map((session) => ({
+            ...session,
+            entryTime24: formatTime24(session.entryTime),
+            outTime24: formatTime24(session.outTime),
+        })) :
+        [];
+
+    const breakSessions = Array.isArray(plain.breakSessions) ?
+        plain.breakSessions.map((session) => ({
+            ...session,
+            breakOutTime24: formatTime24(session.breakOutTime),
+            breakInTime24: formatTime24(session.breakInTime),
+        })) :
+        [];
+
+    const scanHistory = Array.isArray(plain.scanHistory) ?
+        plain.scanHistory.map((item) => ({
+            ...item,
+            scannedAt24: formatTime24(item.scannedAt),
+            scannedAtDateTime24: formatDateTime24(item.scannedAt),
+        })) :
+        [];
+
+    return {
+        ...plain,
+        displayTimeFormat: "24-hour",
+        displayTimeZone: DISPLAY_TIME_ZONE,
+        entryTime24: formatTime24(plain.entryTime),
+        breakOutTime24: formatTime24(plain.breakOutTime),
+        breakInTime24: formatTime24(plain.breakInTime),
+        lastOutTime24: formatTime24(plain.lastOutTime),
+        createdAt24: formatDateTime24(plain.createdAt),
+        updatedAt24: formatDateTime24(plain.updatedAt),
+        workSessions,
+        breakSessions,
+        scanHistory,
+    };
+};
+
+const add24HourReentryFields = (request = {}) => {
+    const plain =
+        request && typeof request.toObject === "function" ?
+        request.toObject() :
+        {...request };
+
+    return {
+        ...plain,
+        displayTimeFormat: "24-hour",
+        displayTimeZone: DISPLAY_TIME_ZONE,
+        requestedAt24: formatDateTime24(plain.requestedAt),
+        decidedAt24: formatDateTime24(plain.decidedAt),
+        createdAt24: formatDateTime24(plain.createdAt),
+        updatedAt24: formatDateTime24(plain.updatedAt),
+    };
+};
+
 const enrichAttendanceRecords = async(records = []) => {
     const plainRecords = records.map((record) => {
         const plain =
@@ -317,7 +431,7 @@ const enrichAttendanceRecords = async(records = []) => {
 
         const timeline = calculateAttendanceTimeline(plain, new Date());
 
-        return {
+        return add24HourAttendanceFields({
             ...plain,
             entryTime: timeline.entryTime,
             breakOutTime: timeline.breakOutTime,
@@ -332,7 +446,7 @@ const enrichAttendanceRecords = async(records = []) => {
             completedWorkSessionCount: timeline.completedWorkSessionCount,
             breakCount: timeline.breakCount,
             reentryCount: timeline.reentryCount,
-        };
+        });
     });
 
     const lookupValues = new Set();
@@ -2846,10 +2960,7 @@ const ATTENDANCE_ACTION_LABELS = {
     OUT: "Out",
 };
 
-const ATTENDANCE_TIME_ZONE =
-    process.env.ATTENDANCE_TIME_ZONE ||
-    process.env.WHATSAPP_TIME_ZONE ||
-    "Europe/London";
+const ATTENDANCE_TIME_ZONE = DISPLAY_TIME_ZONE;
 
 const getAttendanceDateKey = (value = new Date()) => {
     const date = value instanceof Date ? value : new Date(value);
@@ -3221,19 +3332,12 @@ const isWhatsAppIntegrationConfigured = () => {
 };
 
 const formatWhatsAppTimestamp = (date = new Date()) => {
-    const timeZone = process.env.WHATSAPP_TIME_ZONE || "Europe/London";
-    const parts = new Intl.DateTimeFormat("en-GB", {
-        timeZone,
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-    }).formatToParts(date);
+    const timeZone = process.env.WHATSAPP_TIME_ZONE || DISPLAY_TIME_ZONE;
+    const parts = getDateTimeParts24(date, timeZone);
 
-    const value = (type) => parts.find((part) => part.type === type) ?.value || "";
+    if (!parts) return "";
 
-    return `[${value("day")}/${value("month")}, ${value("hour")}:${value("minute")}]`;
+    return `[${parts.day}/${parts.month}, ${parts.hour}:${parts.minute}]`;
 };
 
 const buildWhatsAppAttendanceMessage = ({ employee, scanType, scannedAt }) => {
@@ -3355,7 +3459,7 @@ const sendWhatsAppAttendanceNotification = async({
             const result = await response.json().catch(() => ({}));
 
             if (!response.ok) {
-                throw new Error(result ?.error ?.message || `WhatsApp API returned ${response.status}`);
+                throw new Error(result && result.error && result.error.message || `WhatsApp API returned ${response.status}`);
             }
 
             return {
@@ -3363,7 +3467,7 @@ const sendWhatsAppAttendanceNotification = async({
                 status: "sent",
                 provider: "cloud-api",
                 message,
-                messageId: result ?.messages ?.[0] ?.id || "",
+                messageId: result && result.messages && result.messages[0] ? result.messages[0].id : "" || "",
             };
         } catch (error) {
             console.error("WhatsApp Cloud API error:", error.message);
@@ -3520,6 +3624,9 @@ app.get("/api/admin/attendance-qr", verifyAdmin, async(req, res) => {
                 qrVersion: qrConfig.currentQrVersion,
                 generatedBy: qrConfig.generatedBy,
                 generatedAt: qrConfig.generatedAt,
+                generatedAt24: formatDateTime24(qrConfig.generatedAt),
+                displayTimeFormat: "24-hour",
+                displayTimeZone: DISPLAY_TIME_ZONE,
                 qrPayload: JSON.stringify({ a: "CF", v: qrConfig.currentQrVersion }),
                 whatsappEnabled: isWhatsAppIntegrationConfigured(),
             },
@@ -3571,6 +3678,9 @@ app.post("/api/admin/attendance-qr/regenerate", verifyAdmin, async(req, res) => 
                 qrVersion: qrConfig.currentQrVersion,
                 generatedBy: qrConfig.generatedBy,
                 generatedAt: qrConfig.generatedAt,
+                generatedAt24: formatDateTime24(qrConfig.generatedAt),
+                displayTimeFormat: "24-hour",
+                displayTimeZone: DISPLAY_TIME_ZONE,
                 qrPayload: JSON.stringify({ a: "CF", v: qrConfig.currentQrVersion }),
                 whatsappEnabled: isWhatsAppIntegrationConfigured(),
             },
@@ -3686,12 +3796,15 @@ app.post("/api/my/scan-admin-qr", verifyToken, async(req, res) => {
                         success: true,
                         approvalRequired: true,
                         message: "You already signed out today. Re-entry request sent to admin for approval.",
-                        data: existingAttendance,
+                        data: add24HourAttendanceFields(existingAttendance),
                         request: {
                             _id: request._id,
                             status: request.status,
                             requestedAt: request.requestedAt,
+                            requestedAt24: formatDateTime24(request.requestedAt),
                             date: request.date,
+                            displayTimeFormat: "24-hour",
+                            displayTimeZone: DISPLAY_TIME_ZONE,
                         },
                     });
                 }
@@ -3769,7 +3882,7 @@ app.post("/api/my/scan-admin-qr", verifyToken, async(req, res) => {
             success: true,
             message: result.message,
             username: result.attendance.username || result.identity.username,
-            data: result.attendance,
+            data: add24HourAttendanceFields(result.attendance),
             whatsapp: result.whatsapp,
         });
     } catch (error) {
@@ -3795,7 +3908,7 @@ app.get("/api/my/reentry-request/today", verifyToken, async(req, res) => {
 
         res.json({
             success: true,
-            data: request || null,
+            data: request ? add24HourReentryFields(request) : null,
         });
     } catch (error) {
         res.status(500).json({
@@ -3824,7 +3937,7 @@ app.get("/api/admin/reentry-requests", verifyAdmin, async(req, res) => {
 
         res.json({
             success: true,
-            data: requests,
+            data: requests.map((request) => add24HourReentryFields(request)),
             pendingCount: await AttendanceReentryRequest.countDocuments({
                 status: "pending",
             }),
@@ -4021,8 +4134,10 @@ app.post(
                 success: true,
                 message,
                 data: {
-                    request,
-                    attendance,
+                    request: add24HourReentryFields(request),
+                    attendance: attendance
+                        ? add24HourAttendanceFields(attendance)
+                        : null,
                 },
             });
         } catch (error) {
@@ -4121,7 +4236,7 @@ app.post("/api/scan/attendance", verifyAdmin, async(req, res) => {
             success: true,
             message: result.message,
             username: result.attendance.username || result.identity.username,
-            data: result.attendance,
+            data: add24HourAttendanceFields(result.attendance),
         });
     } catch (error) {
         console.error("Admin employee QR scan error:", error);
@@ -4327,7 +4442,7 @@ app.post("/api/attendance/import-whatsapp", verifyAdmin, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed && parsed.error || "Unable to read line" });
                 continue;
             }
 
@@ -4384,7 +4499,7 @@ app.post("/api/attendance/import-whatsapp", verifyAdmin, async(req, res) => {
                 scanType: importedScanType,
                 scannedAt: scanDateTime,
                 source: "WHATSAPP_IMPORT",
-                scannedBy: req.admin?.username || req.user?.username || "WhatsApp Import",
+                scannedBy: req.admin && req.admin.username || req.user && req.user.username || "WhatsApp Import",
                 qrVersion: "",
                 whatsappStatus: "skipped",
                 whatsappError: "",
@@ -4486,7 +4601,7 @@ app.post("/api/my/attendance/import-whatsapp", verifyToken, async(req, res) => {
             const parsed = parseWhatsAppAttendanceLine(line, fallbackDate);
 
             if (!parsed || parsed.error) {
-                skipped.push({ line, reason: parsed?.error || "Unable to read line" });
+                skipped.push({ line, reason: parsed && parsed.error || "Unable to read line" });
                 continue;
             }
 
@@ -4533,7 +4648,7 @@ app.post("/api/my/attendance/import-whatsapp", verifyToken, async(req, res) => {
                 scanType: importedScanType,
                 scannedAt: scanDateTime,
                 source: "WHATSAPP_IMPORT",
-                scannedBy: req.admin?.username || req.user?.username || "WhatsApp Import",
+                scannedBy: req.admin && req.admin.username || req.user && req.user.username || "WhatsApp Import",
                 qrVersion: "",
                 whatsappStatus: "skipped",
                 whatsappError: "",
@@ -4755,7 +4870,7 @@ app.put("/api/scan/attendance/:id", verifyAdmin, async(req, res) => {
         res.json({
             success: true,
             message: "Attendance updated successfully",
-            data: attendance,
+            data: add24HourAttendanceFields(attendance),
         });
     } catch (error) {
         res.status(error.statusCode || 500).json({
