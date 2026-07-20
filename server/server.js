@@ -2628,6 +2628,85 @@ const getDatesBetween = (startDate, endDate) => {
     return dates;
 };
 
+const normalizeShiftTime24 = (value) => {
+    const textValue = String(value ?? "").trim().toUpperCase();
+
+    if (!textValue) return "";
+
+    let match = textValue.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+
+    if (match) {
+        return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+    }
+
+    match = textValue.match(/^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/);
+
+    if (match) {
+        let hour = Number(match[1]);
+        const minute = match[2];
+        const period = match[3];
+
+        if (period === "AM" && hour === 12) hour = 0;
+        if (period === "PM" && hour !== 12) hour += 12;
+
+        return `${String(hour).padStart(2, "0")}:${minute}`;
+    }
+
+    match = textValue.match(/^(\d{3,4})$/);
+
+    if (match) {
+        const digits = match[1].padStart(4, "0");
+        const hour = Number(digits.slice(0, 2));
+        const minute = Number(digits.slice(2));
+
+        if (hour <= 23 && minute <= 59) {
+            return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        }
+    }
+
+    return null;
+};
+
+const add24HourShiftFields = (record = {}) => {
+    const plain =
+        record && typeof record.toObject === "function" ?
+        record.toObject() :
+        {...record };
+
+    const normalizedValue = (value) => {
+        const normalized = normalizeShiftTime24(value);
+        return normalized === null ? String(value || "") : normalized;
+    };
+
+    const startTime24 = normalizedValue(plain.startTime);
+    const breakStartTime24 = normalizedValue(plain.breakStartTime);
+    const breakEndTime24 = normalizedValue(plain.breakEndTime);
+    const endTime24 = normalizedValue(plain.endTime);
+
+    return {
+        ...plain,
+        displayTimeFormat: "24-hour",
+        startTime: startTime24,
+        breakStartTime: breakStartTime24,
+        breakEndTime: breakEndTime24,
+        endTime: endTime24,
+        startTime24,
+        breakStartTime24,
+        breakEndTime24,
+        endTime24,
+    };
+};
+
+const getTodayDateKey = () => {
+    const parts = getDateTimeParts24(new Date());
+
+    if (parts) {
+        return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+
+    return new Date().toISOString().slice(0, 10);
+};
+
 app.post("/api/shift-schedules/range-bulk", verifyAdmin, async(req, res) => {
     try {
         const {
@@ -2824,6 +2903,330 @@ app.post("/api/shift-schedules/range-bulk", verifyAdmin, async(req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to update shift range",
+            error: error.message,
+        });
+    }
+});
+
+
+// ===========================
+// PAST SHIFT MANAGEMENT
+// These routes are used by AdminPastShiftManager.jsx.
+// ===========================
+
+app.post("/api/past-shifts/apply", verifyAdmin, async(req, res) => {
+    try {
+        const {
+            employeeId,
+            mode = "single",
+            year,
+            month,
+            date,
+            workingDays = [],
+            status = "working",
+            startTime = "",
+            breakStartTime = "",
+            breakEndTime = "",
+            endTime = "",
+            notes = "",
+        } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(String(employeeId || ""))) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a valid employee",
+            });
+        }
+
+        if (!["single", "month"].includes(mode)) {
+            return res.status(400).json({
+                success: false,
+                message: "Past shift mode must be single or month",
+            });
+        }
+
+        if (!["working", "off", "leave", "holiday"].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid shift status",
+            });
+        }
+
+        const employee = await User.findById(employeeId).select("_id username email mobile");
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found",
+            });
+        }
+
+        const normalizedTimes = {
+            startTime: normalizeShiftTime24(startTime),
+            breakStartTime: normalizeShiftTime24(breakStartTime),
+            breakEndTime: normalizeShiftTime24(breakEndTime),
+            endTime: normalizeShiftTime24(endTime),
+        };
+
+        if (Object.values(normalizedTimes).some((value) => value === null)) {
+            return res.status(400).json({
+                success: false,
+                message: "Use 24-hour time in HH:MM format, for example 09:00 or 18:30",
+            });
+        }
+
+        if (status === "working") {
+            if (!normalizedTimes.startTime || !normalizedTimes.endTime) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Start and end time are required for a working shift",
+                });
+            }
+
+            const hasBreakStart = Boolean(normalizedTimes.breakStartTime);
+            const hasBreakEnd = Boolean(normalizedTimes.breakEndTime);
+
+            if (hasBreakStart !== hasBreakEnd) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Enter both break start and break end, or leave both empty",
+                });
+            }
+        }
+
+        const today = getTodayDateKey();
+        let selectedDates = [];
+
+        if (mode === "single") {
+            if (!isValidDateString(date)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Select a valid past date",
+                });
+            }
+
+            if (date > today) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Future date is not allowed on the past shift page",
+                });
+            }
+
+            const dateObject = new Date(`${date}T00:00:00.000Z`);
+
+            selectedDates = [{
+                date,
+                year: dateObject.getUTCFullYear(),
+                month: dateObject.getUTCMonth() + 1,
+                dayOfWeek: dateObject.getUTCDay(),
+            }];
+        } else {
+            const numericYear = Number(year);
+            const numericMonth = Number(month);
+            const selectedDays = Array.isArray(workingDays) ?
+                [...new Set(workingDays.map(Number))] :
+                [];
+
+            if (!Number.isInteger(numericYear) ||
+                numericYear < 2000 ||
+                numericYear > 2100 ||
+                !Number.isInteger(numericMonth) ||
+                numericMonth < 1 ||
+                numericMonth > 12
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Select a valid month and year",
+                });
+            }
+
+            if (
+                selectedDays.length === 0 ||
+                selectedDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Select at least one valid weekday",
+                });
+            }
+
+            selectedDates = getMonthDates(numericYear, numericMonth)
+                .filter((item) => item.date <= today && selectedDays.includes(item.dayOfWeek));
+        }
+
+        if (selectedDates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "No past dates match your selection",
+            });
+        }
+
+        const isWorking = status === "working";
+        const safeNotes = String(notes || "").trim().slice(0, 500);
+        const operations = selectedDates.map((dateInfo) => ({
+            updateOne: {
+                filter: {
+                    employeeId: employee._id,
+                    date: dateInfo.date,
+                },
+                update: {
+                    $set: {
+                        employeeUsername: employee.username,
+                        employeeEmail: employee.email || "",
+                        year: dateInfo.year,
+                        month: dateInfo.month,
+                        dayOfWeek: dateInfo.dayOfWeek,
+                        status,
+                        startTime: isWorking ? normalizedTimes.startTime : "",
+                        breakStartTime: isWorking ? normalizedTimes.breakStartTime : "",
+                        breakEndTime: isWorking ? normalizedTimes.breakEndTime : "",
+                        endTime: isWorking ? normalizedTimes.endTime : "",
+                        notes: safeNotes,
+                        createdBy: req.admin.username || "Admin",
+                    },
+                    $setOnInsert: {
+                        employeeId: employee._id,
+                        date: dateInfo.date,
+                    },
+                },
+                upsert: true,
+            },
+        }));
+
+        const result = await ShiftSchedule.bulkWrite(operations);
+        const dateKeys = selectedDates.map((item) => item.date);
+        const schedules = await ShiftSchedule.find({
+            employeeId: employee._id,
+            date: { $in: dateKeys },
+        }).sort({ date: -1 });
+
+        await createAuditLog(req, {
+            category: "Shifts",
+            action: "APPLY_PAST_SHIFT",
+            description: `Added or updated ${selectedDates.length} past shift(s) for ${employee.username}`,
+            targetType: "ShiftSchedule",
+            targetId: employee._id,
+            targetName: employee.username,
+            metadata: {
+                mode,
+                dates: dateKeys,
+                status,
+                startTime: isWorking ? normalizedTimes.startTime : "",
+                endTime: isWorking ? normalizedTimes.endTime : "",
+                matchedCount: result.matchedCount || 0,
+                modifiedCount: result.modifiedCount || 0,
+                upsertedCount: result.upsertedCount || 0,
+            },
+        });
+
+        emitRealtimeToEmployee(
+            [employee._id, employee.email, employee.username],
+            "myShiftUpdated", {
+                message: "Your past shift schedule was updated",
+                dates: dateKeys,
+                createdAt: new Date(),
+            }
+        );
+
+        emitRealtimeToAdmins("shiftScheduleUpdated", {
+            message: `${employee.username}'s past shift was updated`,
+            employeeId: employee._id,
+            dates: dateKeys,
+            createdAt: new Date(),
+        });
+
+        res.json({
+            success: true,
+            message: `${selectedDates.length} past shift${selectedDates.length === 1 ? "" : "s"} saved successfully`,
+            data: schedules.map(add24HourShiftFields),
+            stats: {
+                selectedDates: selectedDates.length,
+                matchedCount: result.matchedCount || 0,
+                modifiedCount: result.modifiedCount || 0,
+                upsertedCount: result.upsertedCount || 0,
+            },
+        });
+    } catch (error) {
+        console.error("Past shift apply error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Unable to save past shift",
+            error: error.message,
+        });
+    }
+});
+
+app.get("/api/past-shifts/employee/:employeeId", verifyAdmin, async(req, res) => {
+    try {
+        const { employeeId } = req.params;
+        const { startDate, endDate } = req.query;
+
+        if (!mongoose.Types.ObjectId.isValid(String(employeeId || ""))) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid employee id",
+            });
+        }
+
+        if (startDate && !isValidDateString(startDate)) {
+            return res.status(400).json({
+                success: false,
+                message: "Start date must use YYYY-MM-DD format",
+            });
+        }
+
+        if (endDate && !isValidDateString(endDate)) {
+            return res.status(400).json({
+                success: false,
+                message: "End date must use YYYY-MM-DD format",
+            });
+        }
+
+        const employee = await User.findById(employeeId).select("_id username email mobile");
+
+        if (!employee) {
+            return res.status(404).json({
+                success: false,
+                message: "Employee not found",
+            });
+        }
+
+        const today = getTodayDateKey();
+        const safeEndDate = endDate && endDate < today ? endDate : today;
+
+        if (startDate && startDate > safeEndDate) {
+            return res.status(400).json({
+                success: false,
+                message: "Start date cannot be after end date",
+            });
+        }
+
+        const dateFilter = { $lte: safeEndDate };
+        if (startDate) dateFilter.$gte = startDate;
+
+        const schedules = await ShiftSchedule.find({
+                employeeId: employee._id,
+                date: dateFilter,
+            })
+            .sort({ date: -1 })
+            .limit(500);
+
+        res.json({
+            success: true,
+            employee: {
+                _id: employee._id,
+                username: employee.username,
+                email: employee.email || "",
+                mobile: employee.mobile || "",
+            },
+            displayTimeFormat: "24-hour",
+            data: schedules.map(add24HourShiftFields),
+        });
+    } catch (error) {
+        console.error("Past shift report error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Unable to load past shift report",
             error: error.message,
         });
     }
