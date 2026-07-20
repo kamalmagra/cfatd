@@ -14,6 +14,8 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [reentryRequests, setReentryRequests] = useState([]);
+  const [processingReentryId, setProcessingReentryId] = useState("");
   const [editRecord, setEditRecord] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -57,6 +59,79 @@ function AdminDashboard() {
   const getAdminHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem("adminToken")}`,
   });
+
+  const fetchReentryRequests = async (silent = false) => {
+    try {
+      const response = await axios.get("/api/admin/reentry-requests", {
+        headers: getAdminHeaders(),
+        params: { status: "pending" },
+      });
+
+      setReentryRequests(response.data.data || []);
+    } catch (error) {
+      console.error("Re-entry Requests Error:", error);
+
+      if (!silent) {
+        window.showError?.(
+          error.response?.data?.message ||
+            "Failed to load re-entry requests."
+        );
+      }
+    }
+  };
+
+  const handleReentryDecision = async (request, decision) => {
+    const actionLabel = decision === "approved" ? "approve" : "deny";
+    let note = "";
+
+    if (decision === "denied") {
+      note =
+        window.prompt(
+          "Optional reason for denying this re-entry request:",
+          ""
+        ) || "";
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to ${actionLabel} ${
+        request.employeeUsername ||
+        request.employeeName ||
+        "this employee"
+      }'s re-entry request?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setProcessingReentryId(request._id);
+
+      const response = await axios.post(
+        `/api/admin/reentry-requests/${request._id}/decision`,
+        { decision, note },
+        { headers: getAdminHeaders() }
+      );
+
+      window.showSuccess?.(
+        response.data.message ||
+          `Re-entry request ${decision} successfully.`
+      );
+
+      await Promise.all([
+        fetchReentryRequests(true),
+        fetchAttendance(pagination.page, true),
+        fetchAttendanceSummary(true),
+        fetchAttendanceInsights(true),
+      ]);
+    } catch (error) {
+      console.error("Re-entry Decision Error:", error);
+      window.showError?.(
+        error.response?.data?.message ||
+          "Failed to process re-entry request."
+      );
+    } finally {
+      setProcessingReentryId("");
+    }
+  };
 
   const fetchAttendanceSummary = async (silent = false) => {
     try {
@@ -177,8 +252,21 @@ function AdminDashboard() {
     fetchAttendance(1);
     fetchAttendanceSummary(true);
     fetchAttendanceInsights(true);
+    fetchReentryRequests(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedFilters, navigate]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) return undefined;
+
+    const interval = window.setInterval(() => {
+      fetchReentryRequests(true);
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogout = () => {
     const confirmLogout = window.confirm("Are you sure you want to logout?");
@@ -401,58 +489,237 @@ function AdminDashboard() {
     setAppliedFilters(nextForm);
   };
 
-  const downloadUserPDF = () => {
-    if (!selectedUser) return;
+  const fetchSelectedEmployeeExport = async () => {
+    if (!selectedUser) {
+      throw new Error("Select an employee first.");
+    }
 
-    const doc = new jsPDF("landscape", "mm", "a4");
-
-    doc.setFontSize(18);
-    doc.text("Employee Attendance Report", 14, 15);
-
-    doc.setFontSize(11);
-    doc.text(`Employee Name: ${selectedUser.name}`, 14, 25);
-    doc.text(`Username: ${selectedUser.username}`, 14, 32);
-    doc.text(`Mobile: ${selectedUser.mobile}`, 14, 39);
-    doc.text(
-      `Filtered Records On Current Page: ${selectedUser.records.length}`,
-      14,
-      46
+    const response = await axios.get(
+      `/api/attendance/export-employee/${encodeURIComponent(
+        selectedUser.userId
+      )}`,
+      {
+        headers: getAdminHeaders(),
+        params: {
+          startDate: appliedFilters.startDate || undefined,
+          endDate: appliedFilters.endDate || undefined,
+        },
+      }
     );
 
-    autoTable(doc, {
-      startY: 55,
-      head: [
-        [
-          "No",
-          "Date",
-          "Entry Time",
-          "Break Out",
-          "Break In",
-          "Out",
-          "Total Break",
-          "Working Hours",
+    if (!response.data?.success) {
+      throw new Error(
+        response.data?.message || "Employee export API failed."
+      );
+    }
+
+    return response.data;
+  };
+
+  const getEmployeeExportFileName = (extension) => {
+    const rawName =
+      selectedUser?.username ||
+      selectedUser?.name ||
+      "employee";
+    const safeName = String(rawName)
+      .trim()
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "");
+
+    return `${safeName || "employee"}-attendance-report.${extension}`;
+  };
+
+  const downloadUserPDF = async () => {
+    if (!selectedUser) return;
+
+    try {
+      setExporting(true);
+      const exportData = await fetchSelectedEmployeeExport();
+      const records = exportData.data || [];
+      const employee = exportData.employee || selectedUser;
+      const reportSummary = exportData.summary || {};
+
+      if (records.length === 0) {
+        window.showWarning?.(
+          "No attendance records found for this employee."
+        );
+        return;
+      }
+
+      const doc = new jsPDF("landscape", "mm", "a4");
+
+      doc.setFontSize(18);
+      doc.text("Employee Attendance Report", 14, 15);
+
+      doc.setFontSize(10);
+      doc.text(`Employee: ${employee.name || "-"}`, 14, 24);
+      doc.text(`Username: ${employee.username || "-"}`, 14, 30);
+      doc.text(`Email: ${employee.email || "-"}`, 14, 36);
+      doc.text(`Mobile: ${employee.mobile || "-"}`, 14, 42);
+      doc.text(
+        `Date Range: ${appliedFilters.startDate || "All"} to ${
+          appliedFilters.endDate || "All"
+        }`,
+        105,
+        24
+      );
+      doc.text(
+        `Records: ${reportSummary.totalRecords || records.length}`,
+        105,
+        30
+      );
+      doc.text(
+        `Total Work: ${formatSeconds(
+          reportSummary.totalWorkSeconds
+        )}`,
+        105,
+        36
+      );
+      doc.text(
+        `Total Break: ${formatSeconds(
+          reportSummary.totalBreakSeconds
+        )}`,
+        105,
+        42
+      );
+
+      autoTable(doc, {
+        startY: 50,
+        head: [
+          [
+            "No",
+            "Date",
+            "First In",
+            "Latest Break Out",
+            "Latest Break In",
+            "Last Out",
+            "Sessions",
+            "Breaks",
+            "Total Break",
+            "Working Hours",
+          ],
         ],
-      ],
-      body: selectedUser.records.map((item, index) => [
+        body: records.map((item, index) => [
+          index + 1,
+          item.date || formatDate(item.createdAt),
+          formatTime(item.entryTime),
+          formatTime(item.breakOutTime),
+          formatTime(item.breakInTime),
+          formatTime(item.lastOutTime),
+          item.workSessionCount || item.workSessions?.length || 0,
+          item.breakCount || item.breakSessions?.length || 0,
+          formatSeconds(item.totalBreakSeconds),
+          formatSeconds(item.totalWorkSeconds),
+        ]),
+        styles: {
+          fontSize: 8,
+          cellPadding: 2.5,
+        },
+        headStyles: {
+          fillColor: [17, 17, 17],
+        },
+      });
+
+      doc.save(getEmployeeExportFileName("pdf"));
+      window.showSuccess?.(
+        "Employee PDF downloaded successfully."
+      );
+    } catch (error) {
+      console.error("Employee PDF Export Error:", error);
+      window.showError?.(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to export employee PDF."
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const downloadUserCSV = async () => {
+    if (!selectedUser) return;
+
+    try {
+      setExporting(true);
+      const exportData = await fetchSelectedEmployeeExport();
+      const records = exportData.data || [];
+
+      if (records.length === 0) {
+        window.showWarning?.(
+          "No attendance records found for this employee."
+        );
+        return;
+      }
+
+      const headers = [
+        "No",
+        "Employee",
+        "Username",
+        "Email",
+        "Mobile",
+        "Date",
+        "First In",
+        "Latest Break Out",
+        "Latest Break In",
+        "Last Out",
+        "Work Sessions",
+        "Break Count",
+        "Total Break",
+        "Total Work",
+        "Current Status",
+      ];
+
+      const csvEscape = (value) =>
+        `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+      const rows = records.map((item, index) => [
         index + 1,
+        item.name || item.username || "-",
+        item.username || "-",
+        item.email || "-",
+        item.mobile || "-",
         item.date || formatDate(item.createdAt),
         formatTime(item.entryTime),
         formatTime(item.breakOutTime),
         formatTime(item.breakInTime),
         formatTime(item.lastOutTime),
+        item.workSessionCount || item.workSessions?.length || 0,
+        item.breakCount || item.breakSessions?.length || 0,
         formatSeconds(item.totalBreakSeconds),
         formatSeconds(item.totalWorkSeconds),
-      ]),
-      styles: {
-        fontSize: 10,
-        cellPadding: 3,
-      },
-      headStyles: {
-        fillColor: [17, 17, 17],
-      },
-    });
+        item.currentStatus || "-",
+      ]);
 
-    doc.save(`${selectedUser.username}-attendance-report.pdf`);
+      const csv = [headers, ...rows]
+        .map((row) => row.map(csvEscape).join(","))
+        .join("\n");
+
+      const blob = new Blob(["\uFEFF", csv], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = getEmployeeExportFileName("csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      window.showSuccess?.(
+        "Employee CSV downloaded successfully."
+      );
+    } catch (error) {
+      console.error("Employee CSV Export Error:", error);
+      window.showError?.(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to export employee CSV."
+      );
+    } finally {
+      setExporting(false);
+    }
   };
 
 
@@ -746,6 +1013,101 @@ function AdminDashboard() {
           </div>
         </div>
 
+        {reentryRequests.length > 0 && (
+          <div className="mb-8 rounded-[30px] border border-orange-500/30 bg-orange-500/10 p-6 shadow-2xl">
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-bold text-orange-300">
+                  Action Required
+                </p>
+                <h2 className="mt-1 text-3xl font-bold">
+                  Re-entry Requests
+                </h2>
+                <p className="mt-2 text-sm text-gray-400">
+                  These employees already signed out and are asking to
+                  start another work session on the same day.
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-orange-500 px-4 py-2 font-black text-black">
+                {reentryRequests.length} Pending
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {reentryRequests.map((request) => {
+                const isProcessing =
+                  processingReentryId === request._id;
+
+                return (
+                  <div
+                    key={request._id}
+                    className="rounded-[24px] border border-white/10 bg-black/40 p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-bold">
+                          {request.employeeName ||
+                            request.employeeUsername ||
+                            "Employee"}
+                        </h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {request.employeeUsername || "-"} •{" "}
+                          {request.employeeEmail || "-"}
+                        </p>
+                      </div>
+
+                      <span className="rounded-full bg-yellow-500/10 px-3 py-1 text-xs font-bold uppercase text-yellow-300">
+                        Pending
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-2xl bg-white/5 p-3">
+                        <p className="text-gray-500">Shift Date</p>
+                        <p className="mt-1 font-bold">{request.date}</p>
+                      </div>
+
+                      <div className="rounded-2xl bg-white/5 p-3">
+                        <p className="text-gray-500">Requested At</p>
+                        <p className="mt-1 font-bold">
+                          {formatTime(request.requestedAt)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleReentryDecision(
+                            request,
+                            "approved"
+                          )
+                        }
+                        disabled={isProcessing}
+                        className="rounded-2xl bg-green-500 px-4 py-3 font-extrabold text-black transition hover:bg-green-400 disabled:opacity-50"
+                      >
+                        {isProcessing ? "Processing..." : "Accept"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleReentryDecision(request, "denied")
+                        }
+                        disabled={isProcessing}
+                        className="rounded-2xl bg-red-500/15 px-4 py-3 font-extrabold text-red-300 transition hover:bg-red-500/25 disabled:opacity-50"
+                      >
+                        {isProcessing ? "Processing..." : "Deny"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* WHATSAPP ATTENDANCE IMPORT */}
         <div className="mb-8 rounded-[30px] border border-green-500/20 bg-[#050505] p-6 shadow-2xl">
@@ -1331,9 +1693,18 @@ function AdminDashboard() {
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={downloadUserPDF}
-                className="rounded-2xl bg-green-500/10 px-5 py-3 font-semibold text-green-400 transition hover:bg-green-500/20"
+                disabled={exporting}
+                className="rounded-2xl bg-green-500/10 px-5 py-3 font-semibold text-green-400 transition hover:bg-green-500/20 disabled:opacity-50"
               >
-                Download PDF
+                {exporting ? "Preparing..." : "Download PDF"}
+              </button>
+
+              <button
+                onClick={downloadUserCSV}
+                disabled={exporting}
+                className="rounded-2xl bg-blue-500/10 px-5 py-3 font-semibold text-blue-400 transition hover:bg-blue-500/20 disabled:opacity-50"
+              >
+                {exporting ? "Preparing..." : "Download CSV"}
               </button>
 
               <button
@@ -1360,6 +1731,8 @@ function AdminDashboard() {
                   <th className="p-5 text-left">Break Out</th>
                   <th className="p-5 text-left">Break In</th>
                   <th className="p-5 text-left">Out</th>
+                  <th className="p-5 text-left">Sessions</th>
+                  <th className="p-5 text-left">Breaks</th>
                   <th className="p-5 text-left">Total Break</th>
                   <th className="p-5 text-left">Work Hours</th>
                   <th className="p-5 text-left">Edit</th>
@@ -1411,6 +1784,16 @@ function AdminDashboard() {
                       <td className="p-5 font-semibold text-red-400">
                         {formatTime(item.lastOutTime)}
                       </td>
+                      <td className="p-5 text-cyan-400">
+                        {item.workSessionCount ||
+                          item.workSessions?.length ||
+                          0}
+                      </td>
+                      <td className="p-5 text-purple-400">
+                        {item.breakCount ||
+                          item.breakSessions?.length ||
+                          0}
+                      </td>
                       <td className="p-5">
                         <span className="rounded-full bg-yellow-500/10 px-3 py-2 font-semibold text-yellow-400">
                           {formatSeconds(item.totalBreakSeconds)}
@@ -1434,7 +1817,7 @@ function AdminDashboard() {
                 ) : (
                   <tr>
                     <td
-                      colSpan="12"
+                      colSpan="14"
                       className="py-16 text-center text-xl text-gray-500"
                     >
                       No Attendance Records Found

@@ -64,11 +64,26 @@ const createWhatsAppMessage = (employeeName, type, scannedAt) =>
     employeeName || "Employee"
   }: ${getActionTitle(type)}`;
 
+const getLondonDateKey = (value = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+
+  const partValue = (type) =>
+    parts.find((part) => part.type === type)?.value || "";
+
+  return `${partValue("year")}-${partValue("month")}-${partValue("day")}`;
+};
+
 const EmployeeScan = () => {
   const navigate = useNavigate();
   const scannerRef = useRef(null);
   const fileInputRef = useRef(null);
   const scanLockRef = useRef(false);
+  const lastRequestStatusRef = useRef("");
 
   const [employee, setEmployee] = useState(null);
   const [scanType, setScanType] = useState("");
@@ -79,6 +94,7 @@ const EmployeeScan = () => {
   );
   const [todayRecord, setTodayRecord] = useState(null);
   const [lastResult, setLastResult] = useState(null);
+  const [reentryRequest, setReentryRequest] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const getToken = () => localStorage.getItem("userToken");
@@ -130,13 +146,85 @@ const EmployeeScan = () => {
       }
 
       const result = await response.json();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getLondonDateKey();
       const record = (result.data || []).find((item) => item.date === today);
       setTodayRecord(record || null);
     } catch (error) {
       console.error("Load today attendance error:", error);
     }
   }, [navigate]);
+
+  const loadReentryRequest = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+
+    try {
+      const response = await fetch("/api/my/reentry-request/today", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) return;
+
+      const result = await response.json();
+      const request = result.data || null;
+      const previousStatus = lastRequestStatusRef.current;
+
+      setReentryRequest(request);
+
+      if (!request) {
+        lastRequestStatusRef.current = "";
+        return;
+      }
+
+      if (
+        previousStatus === "pending" &&
+        request.status === "approved"
+      ) {
+        const approvedAt = request.requestedAt || request.decidedAt || new Date().toISOString();
+
+        setLastResult({
+          type: "ENTRY",
+          message:
+            "Admin approved your re-entry. Your In was added to today's same shift.",
+          scannedAt: approvedAt,
+          whatsappMessage: createWhatsAppMessage(
+            employee?.username,
+            "ENTRY",
+            approvedAt
+          ),
+        });
+        setMessage(
+          "Re-entry approved. Your In time is now included in today's shift."
+        );
+        await loadTodayAttendance();
+
+        window.showSuccess?.(
+          "Admin approved your re-entry. Your In has been added."
+        );
+      }
+
+      if (
+        previousStatus === "pending" &&
+        request.status === "denied"
+      ) {
+        setMessage(
+          request.decisionNote
+            ? `Re-entry denied: ${request.decisionNote}`
+            : "Your re-entry request was denied by admin."
+        );
+
+        window.showError?.(
+          request.decisionNote
+            ? `Re-entry denied: ${request.decisionNote}`
+            : "Your re-entry request was denied by admin."
+        );
+      }
+
+      lastRequestStatusRef.current = request.status;
+    } catch (error) {
+      console.error("Load re-entry request error:", error);
+    }
+  }, [employee?.username, loadTodayAttendance]);
 
   useEffect(() => {
     const token = getToken();
@@ -164,6 +252,18 @@ const EmployeeScan = () => {
       stopScanner();
     };
   }, [loadTodayAttendance, navigate, stopScanner]);
+
+  useEffect(() => {
+    if (!employee) return undefined;
+
+    loadReentryRequest();
+
+    const interval = window.setInterval(() => {
+      loadReentryRequest();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [employee, loadReentryRequest]);
 
   const normalizeAdminQr = (decodedText) => {
     const data = JSON.parse(decodedText);
@@ -217,6 +317,30 @@ const EmployeeScan = () => {
 
       if (!response.ok || !result.success) {
         throw new Error(result.message || "Attendance could not be saved.");
+      }
+
+      if (result.approvalRequired) {
+        const request = result.request || {
+          status: "pending",
+          requestedAt: new Date().toISOString(),
+        };
+
+        lastRequestStatusRef.current = request.status || "pending";
+        setReentryRequest(request);
+        setLastResult(null);
+        setMessage(
+          result.message ||
+            "Re-entry request sent to admin. Wait for approval."
+        );
+        setScanType("");
+        await loadTodayAttendance();
+
+        window.showWarning?.(
+          result.message ||
+            "Re-entry request sent to admin. Wait for approval."
+        );
+
+        return true;
       }
 
       const scannedAt = new Date().toISOString();
@@ -368,6 +492,31 @@ const EmployeeScan = () => {
   const formatTime = (value) => {
     if (!value) return "--:--";
     return new Date(value).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatSeconds = (seconds) => {
+    const safeSeconds = Math.max(0, Number(seconds) || 0);
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainingSeconds = safeSeconds % 60;
+
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+      2,
+      "0"
+    )}:${String(remainingSeconds).padStart(2, "0")}`;
+  };
+
+  const formatRequestDateTime = (value) => {
+    if (!value) return "-";
+
+    return new Date(value).toLocaleString("en-GB", {
+      timeZone: "Europe/London",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -539,12 +688,95 @@ const EmployeeScan = () => {
               <h2 className="mt-1 text-2xl font-bold">Live Status</h2>
 
               <div className="mt-5 space-y-3">
-                <StatusRow label="In" value={formatTime(todayRecord?.entryTime)} tone="text-green-300" />
-                <StatusRow label="Break Out" value={formatTime(todayRecord?.breakOutTime)} tone="text-yellow-300" />
-                <StatusRow label="Break In" value={formatTime(todayRecord?.breakInTime)} tone="text-blue-300" />
-                <StatusRow label="Sign Out" value={formatTime(todayRecord?.lastOutTime)} tone="text-red-300" />
+                <StatusRow
+                  label="Current Status"
+                  value={(todayRecord?.currentStatus || "NOT_STARTED").replaceAll(
+                    "_",
+                    " "
+                  )}
+                  tone="text-purple-300"
+                />
+                <StatusRow
+                  label="First In"
+                  value={formatTime(todayRecord?.entryTime)}
+                  tone="text-green-300"
+                />
+                <StatusRow
+                  label="Latest Break Out"
+                  value={formatTime(todayRecord?.breakOutTime)}
+                  tone="text-yellow-300"
+                />
+                <StatusRow
+                  label="Latest Break In"
+                  value={formatTime(todayRecord?.breakInTime)}
+                  tone="text-blue-300"
+                />
+                <StatusRow
+                  label="Last Out"
+                  value={formatTime(todayRecord?.lastOutTime)}
+                  tone="text-red-300"
+                />
+                <StatusRow
+                  label="Total Break"
+                  value={formatSeconds(todayRecord?.totalBreakSeconds)}
+                  tone="text-yellow-300"
+                />
+                <StatusRow
+                  label="Total Work"
+                  value={formatSeconds(todayRecord?.totalWorkSeconds)}
+                  tone="text-green-300"
+                />
+                <StatusRow
+                  label="Sessions / Breaks"
+                  value={`${todayRecord?.workSessionCount || 0} / ${
+                    todayRecord?.breakCount || 0
+                  }`}
+                  tone="text-cyan-300"
+                />
               </div>
             </div>
+
+            {reentryRequest && (
+              <div
+                className={`rounded-[30px] border p-5 ${
+                  reentryRequest.status === "pending"
+                    ? "border-yellow-500/20 bg-yellow-500/10"
+                    : reentryRequest.status === "approved"
+                    ? "border-green-500/20 bg-green-500/10"
+                    : "border-red-500/20 bg-red-500/10"
+                }`}
+              >
+                <p
+                  className={`text-sm font-bold ${
+                    reentryRequest.status === "pending"
+                      ? "text-yellow-300"
+                      : reentryRequest.status === "approved"
+                      ? "text-green-300"
+                      : "text-red-300"
+                  }`}
+                >
+                  Re-entry Request
+                </p>
+
+                <h3 className="mt-2 text-2xl font-bold capitalize">
+                  {reentryRequest.status}
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-gray-300">
+                  {reentryRequest.status === "pending"
+                    ? "You already signed out. Admin must approve before another In can be added."
+                    : reentryRequest.status === "approved"
+                    ? "Admin approved the request and your new In was added to the same day's shift."
+                    : reentryRequest.decisionNote
+                    ? `Admin denied the request: ${reentryRequest.decisionNote}`
+                    : "Admin denied the re-entry request."}
+                </p>
+
+                <p className="mt-3 text-xs text-gray-500">
+                  Requested: {formatRequestDateTime(reentryRequest.requestedAt)}
+                </p>
+              </div>
+            )}
 
             {lastResult && (
               <div className="rounded-[30px] border border-green-500/20 bg-green-500/10 p-5">
