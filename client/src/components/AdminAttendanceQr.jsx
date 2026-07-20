@@ -9,6 +9,8 @@ const AdminAttendanceQr = () => {
   const [qrData, setQrData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [showGeneratePopup, setShowGeneratePopup] = useState(false);
+  const [countdown, setCountdown] = useState(5);
 
   const getHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem("adminToken")}`,
@@ -62,12 +64,30 @@ const AdminAttendanceQr = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
-  const regenerateQr = async () => {
-    const confirmed = window.confirm(
-      "Generate a new admin attendance QR? The current QR will stop working immediately."
-    );
+  const openGeneratePopup = () => {
+    if (regenerating || loading) return;
+    setCountdown(5);
+    setShowGeneratePopup(true);
+  };
 
-    if (!confirmed) return;
+  const cancelGeneratePopup = () => {
+    if (regenerating) return;
+    setShowGeneratePopup(false);
+    setCountdown(5);
+  };
+
+  useEffect(() => {
+    if (!showGeneratePopup || regenerating || countdown <= 0) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setCountdown((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [showGeneratePopup, regenerating, countdown]);
+
+  const regenerateQr = async () => {
+    if (countdown > 0 || regenerating) return;
 
     try {
       setRegenerating(true);
@@ -85,6 +105,8 @@ const AdminAttendanceQr = () => {
       }
 
       setQrData(result.data);
+      setShowGeneratePopup(false);
+      setCountdown(5);
       if (window.showSuccess) window.showSuccess(result.message);
       else alert(result.message);
     } catch (error) {
@@ -156,7 +178,6 @@ const AdminAttendanceQr = () => {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-      hourCycle: "h23",
     });
   };
 
@@ -193,7 +214,7 @@ const AdminAttendanceQr = () => {
             </button>
 
             <button
-              onClick={regenerateQr}
+              onClick={openGeneratePopup}
               disabled={regenerating || loading}
               className="rounded-2xl bg-white px-5 py-3 font-bold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -326,6 +347,60 @@ const AdminAttendanceQr = () => {
           </div>
         </div>
       </div>
+
+      {showGeneratePopup && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="generate-admin-qr-title"
+        >
+          <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-[#111] p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-yellow-400/30 bg-yellow-400/10 text-3xl font-black text-yellow-300">
+              {countdown}
+            </div>
+
+            <h2 id="generate-admin-qr-title" className="mt-5 text-3xl font-extrabold">
+              Generate a new QR?
+            </h2>
+            <p className="mt-3 leading-7 text-gray-400">
+              The current QR will keep working until you confirm. After generation, the old QR will stop working immediately.
+            </p>
+
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full bg-white transition-all duration-1000"
+                style={{ width: `${((5 - countdown) / 5) * 100}%` }}
+              />
+            </div>
+
+            <p className="mt-3 text-sm text-gray-500">
+              {countdown > 0
+                ? `Please wait ${countdown} second${countdown === 1 ? "" : "s"} before confirming.`
+                : "You can now generate the new QR."}
+            </p>
+
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={cancelGeneratePopup}
+                disabled={regenerating}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 font-bold text-white transition hover:bg-white/10 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={regenerateQr}
+                disabled={countdown > 0 || regenerating}
+                className="rounded-2xl bg-white px-4 py-4 font-bold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {regenerating ? "Generating..." : "Generate New QR"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
