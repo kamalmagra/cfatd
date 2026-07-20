@@ -2629,7 +2629,7 @@ const getDatesBetween = (startDate, endDate) => {
 };
 
 const normalizeShiftTime24 = (value) => {
-    const textValue = String(value ? ? "").trim().toUpperCase();
+    const textValue = String(value ?? "").trim().toUpperCase();
 
     if (!textValue) return "";
 

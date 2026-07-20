@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================
+   GLOBAL
+=========================== */
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    background: #050505;
+    color: white;
+    font-family: Inter, sans-serif;
+    overflow-x: hidden;
+}
+
+
+/* ===========================
+   SCROLLBAR
+=========================== */
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #101010;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #7c3aed;
+    border-radius: 20px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #9333ea;
+}
+
+
+/* ===========================
+   QR SCANNER
+=========================== */
+
+#reader {
+    background: white !important;
+    color: black !important;
+    padding: 15px;
+    border-radius: 18px;
+    border: 2px solid #7c3aed;
+    box-shadow: 0 10px 40px rgba(124, 58, 237, .25);
+}
+
+#reader * {
+    color: black !important;
+}
+
+#reader video {
+    border-radius: 15px;
+}
+
+#reader__scan_region {
+    color: black !important;
+}
+
+#reader button {
+    background: linear-gradient(135deg, #9333ea, #7c3aed) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 10px 18px !important;
+    font-weight: 600 !important;
+    transition: .3s;
+    cursor: pointer;
+}
+
+#reader button:hover {
+    transform: scale(1.05);
+}
+
+#reader select {
+    background: white !important;
+    color: black !important;
+    border-radius: 8px !important;
+    padding: 8px !important;
+}
+
+#reader__filescan_input {
+    color: black !important;
+}
+
+
+/* ===========================
+   SWEET ALERT
+=========================== */
+
+.swal2-popup {
+    border-radius: 22px !important;
+    padding: 25px !important;
+    background: #ffffff !important;
+}
+
+.swal2-title {
+    color: #2563eb !important;
+    font-size: 42px !important;
+    font-weight: 800 !important;
+}
+
+.swal2-html-container {
+    color: #333 !important;
+    font-size: 18px !important;
+}
+
+.swal2-confirm {
+    background: #2563eb !important;
+    border-radius: 10px !important;
+    padding: 10px 35px !important;
+    font-size: 17px !important;
+}
+
+.swal2-cancel {
+    border-radius: 10px !important;
+}
+
+
+/* ===========================
+   CARD
+=========================== */
+
+.glass-card {
+    background: rgba(255, 255, 255, .05);
+    backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 20px;
+}
+
+
+/* ===========================
+   BUTTON
+=========================== */
+
+.primary-btn {
+    background: linear-gradient(135deg, #9333ea, #2563eb);
+    color: white;
+    border-radius: 12px;
+    transition: .3s;
+}
+
+.primary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(147, 51, 234, .4);
+}
+
+
+/* ===========================
+   INPUT
+=========================== */
+
+input,
+select,
+textarea {
+    transition: .3s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: #9333ea;
+    box-shadow: 0 0 15px rgba(147, 51, 234, .4);
+}
+
+
+/* ===========================
+   ANIMATION
+=========================== */
+
+.fade-up {
+    animation: fadeUp .6s ease;
+}
+
+@keyframes fadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(35px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
