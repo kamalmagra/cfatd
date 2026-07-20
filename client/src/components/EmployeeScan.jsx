@@ -494,6 +494,8 @@ const EmployeeScan = () => {
     return new Date(value).toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
     });
   };
 
@@ -519,6 +521,8 @@ const EmployeeScan = () => {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
     });
   };
 

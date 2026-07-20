@@ -459,7 +459,7 @@ const AdminAnalytics = () => {
                             {row.scheduledStart || "-"} - {row.scheduledEnd || "-"}
                           </td>
                           <td className="p-4 text-gray-300">
-                            {row.entryTime ? new Date(row.entryTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}
+                            {row.entryTime ? new Date(row.entryTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" }) : "-"}
                           </td>
                           <td className="p-4 text-red-400">{formatSeconds(row.lateSeconds)}</td>
                           <td className="p-4 text-cyan-400">{formatSeconds(row.overtimeSeconds)}</td>
